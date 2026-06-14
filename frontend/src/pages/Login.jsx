@@ -35,7 +35,8 @@ export default function Login() {
 
   useEffect(() => {
     if (token && user) {
-      navigate(user.role === 'teacher' ? '/teacher' : '/dashboard', { replace: true });
+      const dest = user.role === 'teacher' ? '/teacher' : user.role === 'admin' ? '/admin' : '/dashboard';
+      navigate(dest, { replace: true });
     }
     return () => dispatch(clearError());
   }, [token, user, navigate, dispatch]);
@@ -46,39 +47,42 @@ export default function Login() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-primary to-primary-dark flex items-center justify-center p-4">
-      <div className="w-full max-w-md">
+    <div className="min-h-screen relative flex items-center justify-center p-4 overflow-hidden">
+      {/* Fondo fotografía */}
+      <div
+        className="absolute inset-0 bg-cover bg-center"
+        style={{ backgroundImage: 'url(/chat.jpeg)' }}
+      />
+      {/* Capa oscura sobre la foto */}
+      <div className="absolute inset-0 bg-secondary/70" />
 
-        {/* Logo de marca */}
-        <div className="flex justify-center mb-8">
-          <img src="/chat.jpeg" alt="ChatSIRA — UFPS" className="w-64 object-contain drop-shadow-lg" />
-        </div>
-
-        {/* Card */}
+      <div className="relative z-10 w-full max-w-sm">
+        {/* Card principal */}
         <div className="bg-white rounded-2xl shadow-2xl overflow-hidden">
+
+          {/* Cabecera roja */}
+          <div className="bg-primary px-7 py-5 flex items-center gap-3">
+            <img src="/logo.jpeg" alt="SIRA" className="w-12 h-12 rounded-xl object-cover shadow-md shrink-0" />
+            <div>
+              <h1 className="text-white font-bold text-xl leading-tight tracking-wide">SIRA 1.0</h1>
+              <p className="text-white/70 text-[11px] leading-tight">Sistema Inteligente de Recomendación Académica</p>
+            </div>
+          </div>
 
           {/* ── Auto-login desde plugin Moodle ── */}
           {isAutoLogin ? (
-            <div className="p-10 flex flex-col items-center gap-4">
+            <div className="px-7 py-10 flex flex-col items-center gap-4">
               <div className="w-10 h-10 border-4 border-primary border-t-transparent rounded-full animate-spin" />
               <p className="text-secondary text-sm font-medium">Conectando con Moodle...</p>
-              {error && (
-                <p className="text-red-600 text-xs text-center mt-2">{error}</p>
-              )}
+              {error && <p className="text-red-600 text-xs text-center mt-1">{error}</p>}
             </div>
           ) : (
-            <div className="p-8">
-              {/* Encabezado del formulario */}
-              <div className="flex items-center gap-3 mb-6">
-                <img src="/logo.jpeg" alt="SIRA" className="w-11 h-11 rounded-xl object-cover shrink-0 shadow" />
-                <div>
-                  <h2 className="text-secondary font-bold text-lg leading-tight">Panel Administrativo</h2>
-                  <p className="text-gray-400 text-xs">Acceso exclusivo para administradores</p>
-                </div>
-              </div>
+            <div className="px-7 py-6">
+              <p className="text-secondary font-semibold text-sm mb-1">Panel Administrativo</p>
+              <p className="text-gray-400 text-xs mb-5">Acceso exclusivo para administradores UFPS</p>
 
               {error && (
-                <div className="bg-red-50 border border-red-200 text-red-700 rounded-lg px-4 py-3 text-sm mb-5">
+                <div className="bg-red-50 border border-red-200 text-red-700 rounded-lg px-4 py-3 text-sm mb-4">
                   {error}
                 </div>
               )}
@@ -88,7 +92,7 @@ export default function Login() {
                   label="Correo electrónico"
                   name="email"
                   type="email"
-                  placeholder="admin@sira.ufps.edu.co"
+                  placeholder="admin@ufps.edu.co"
                   value={adminForm.email}
                   onChange={(e) => setAdminForm({ ...adminForm, email: e.target.value })}
                   required
@@ -102,19 +106,24 @@ export default function Login() {
                   onChange={(e) => setAdminForm({ ...adminForm, password: e.target.value })}
                   required
                 />
-                <Button type="submit" className="w-full mt-2" loading={loading}>
-                  Ingresar al sistema
+                <Button type="submit" className="w-full" loading={loading}>
+                  Iniciar sesión
                 </Button>
               </form>
             </div>
           )}
+
+          {/* Pie de card */}
+          <div className="px-7 py-3 bg-gray-50 border-t border-gray-100 text-center">
+            <p className="text-gray-400 text-[11px]">
+              Estudiantes y docentes acceden desde el bloque SIRA en Moodle
+            </p>
+          </div>
         </div>
 
-        <p className="text-white/50 text-xs text-center mt-5">
-          Estudiantes y docentes acceden desde el bloque SIRA en Moodle UFPS
-        </p>
-        <p className="text-white/30 text-xs text-center mt-1">
-          SIRA v2.0 · Ingeniería de Sistemas — UFPS
+        {/* Versión fuera de la card */}
+        <p className="text-white/40 text-xs text-center mt-4">
+          SIRA v1.0 · Ingeniería de Sistemas — UFPS
         </p>
       </div>
     </div>

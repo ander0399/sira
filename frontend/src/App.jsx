@@ -1,5 +1,5 @@
 /**
- * Componente raíz de SIRA v2.
+ * Componente raíz de SIRA v1.0.
  * Rutas: login | dashboard (estudiante) | teacher | chat | reports
  * Estudiantes y docentes acceden vía Moodle SSO; admins con email+contraseña.
  */
