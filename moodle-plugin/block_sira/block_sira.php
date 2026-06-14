@@ -57,65 +57,117 @@ class block_sira extends block_base {
     }
 
     /**
-     * Genera el HTML del bloque: botón que abre SIRA en un modal con iframe.
-     * El iframe carga redirect.php, que genera el token Moodle y redirige
-     * al frontend de SIRA con autenticación automática.
+     * Genera el HTML del bloque: botón que abre SIRA como widget flotante
+     * en la esquina inferior derecha, sin bloquear la vista de Moodle.
+     * El iframe carga redirect.php de forma diferida (solo al primer clic).
      */
     private function renderContent(moodle_url $redirectUrl, string $role, string $firstname) {
-        $isTeacher  = $role === 'teacher';
-        $desc       = get_string($isTeacher ? 'sira_description_teacher' : 'sira_description_student', 'block_sira');
-        $btnLabel   = get_string('open_sira', 'block_sira');
-        $iframeSrc  = htmlspecialchars($redirectUrl->out(false), ENT_QUOTES);
+        $isTeacher = $role === 'teacher';
+        $desc      = get_string($isTeacher ? 'sira_description_teacher' : 'sira_description_student', 'block_sira');
+        $btnLabel  = get_string('open_sira', 'block_sira');
+        $iframeSrc = htmlspecialchars($redirectUrl->out(false), ENT_QUOTES);
 
+        // ── Contenido del bloque: descripción + botón de apertura ────────────
         $html  = '<div style="font-family:inherit;">';
-
-        // Descripción breve
-        $html .= '  <p style="font-size:0.8rem; color:#666; margin:0 0 12px; line-height:1.4;">';
+        $html .= '  <p style="font-size:0.8rem;color:#666;margin:0 0 12px;line-height:1.4;">';
         $html .= '    ' . format_string($desc);
         $html .= '  </p>';
-
-        // Botón de apertura del modal
-        $html .= '  <button onclick="document.getElementById(\'sira-modal\').style.display=\'flex\'" ';
-        $html .= '    style="display:flex; align-items:center; justify-content:center; gap:8px; width:100%; ';
-        $html .= '           background:#C8102E; color:#fff; border:none; padding:10px 16px; ';
-        $html .= '           border-radius:8px; cursor:pointer; font-weight:600; font-size:0.85rem; ';
-        $html .= '           transition:background 0.2s;" ';
-        $html .= '    onmouseover="this.style.background=\'#a00d24\'" ';
+        $html .= '  <button onclick="openSiraWidget()"';
+        $html .= '    style="display:flex;align-items:center;justify-content:center;gap:8px;width:100%;';
+        $html .= '           background:#C8102E;color:#fff;border:none;padding:10px 16px;';
+        $html .= '           border-radius:8px;cursor:pointer;font-weight:600;font-size:0.85rem;transition:background 0.2s;"';
+        $html .= '    onmouseover="this.style.background=\'#a00d24\'"';
         $html .= '    onmouseout="this.style.background=\'#C8102E\'">';
-        $html .= '    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>';
+        $html .= '    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">';
+        $html .= '      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>';
+        $html .= '    </svg>';
         $html .= '    ' . format_string($btnLabel);
         $html .= '  </button>';
-
         $html .= '</div>';
 
-        // ── Modal con iframe ─────────────────────────────────────────────────────
-        // Montado fuera del bloque para que ocupe toda la pantalla del navegador.
-        $html .= '<div id="sira-modal" ';
-        $html .= '  style="display:none; position:fixed; inset:0; z-index:99999; ';
-        $html .= '         background:rgba(0,0,0,0.80); align-items:center; justify-content:center;">';
+        // ── Widget flotante (380 × 540 px, esquina inferior derecha) ─────────
+        $html .= '<div id="sira-widget"';
+        $html .= '  style="display:none;position:fixed;bottom:24px;right:24px;z-index:99999;';
+        $html .= '         width:380px;height:540px;border-radius:16px;overflow:hidden;';
+        $html .= '         box-shadow:0 8px 40px rgba(0,0,0,0.28);flex-direction:column;">';
 
-        $html .= '  <div style="width:96vw; height:94vh; background:#fff; border-radius:14px; ';
-        $html .= '              overflow:hidden; position:relative; box-shadow:0 30px 60px rgba(0,0,0,0.5);">';
-
-        // Barra superior del modal
-        $html .= '    <div style="display:flex; align-items:center; justify-content:space-between; ';
-        $html .= '                padding:10px 16px; background:#C8102E; color:#fff;">';
-        $html .= '      <span style="font-weight:700; font-size:0.95rem;">ChatSIRA — UFPS</span>';
-        $html .= '      <button onclick="document.getElementById(\'sira-modal\').style.display=\'none\'" ';
-        $html .= '        style="background:rgba(255,255,255,0.2); border:none; color:#fff; ';
-        $html .= '               border-radius:6px; padding:4px 10px; cursor:pointer; font-size:1.1rem; ';
-        $html .= '               line-height:1; font-weight:bold; transition:background 0.2s;" ';
-        $html .= '        onmouseover="this.style.background=\'rgba(255,255,255,0.35)\'" ';
-        $html .= '        onmouseout="this.style.background=\'rgba(255,255,255,0.2)\'">✕</button>';
+        // Barra superior del widget
+        $html .= '  <div style="display:flex;align-items:center;justify-content:space-between;';
+        $html .= '              padding:10px 14px;background:#C8102E;color:#fff;flex-shrink:0;">';
+        $html .= '    <div style="display:flex;align-items:center;gap:8px;">';
+        $html .= '      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">';
+        $html .= '        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>';
+        $html .= '      </svg>';
+        $html .= '      <span style="font-weight:700;font-size:0.9rem;">ChatSIRA — UFPS</span>';
         $html .= '    </div>';
+        $html .= '    <div style="display:flex;gap:6px;">';
 
-        // iframe que carga SIRA con autenticación automática
-        $html .= '    <iframe src="' . $iframeSrc . '" ';
-        $html .= '      style="width:100%; height:calc(100% - 46px); border:none;" ';
-        $html .= '      allow="clipboard-write" title="ChatSIRA"></iframe>';
+        // Botón minimizar: oculta el widget y muestra el FAB
+        $html .= '      <button onclick="minimizeSiraWidget()" title="Minimizar"';
+        $html .= '        style="background:rgba(255,255,255,0.2);border:none;color:#fff;';
+        $html .= '               border-radius:4px;width:26px;height:26px;cursor:pointer;';
+        $html .= '               font-size:1.1rem;line-height:1;"';
+        $html .= '        onmouseover="this.style.background=\'rgba(255,255,255,0.35)\'"';
+        $html .= '        onmouseout="this.style.background=\'rgba(255,255,255,0.2)\'">—</button>';
 
+        // Botón cerrar: oculta widget y FAB por completo
+        $html .= '      <button onclick="closeSiraWidget()" title="Cerrar"';
+        $html .= '        style="background:rgba(255,255,255,0.2);border:none;color:#fff;';
+        $html .= '               border-radius:4px;width:26px;height:26px;cursor:pointer;';
+        $html .= '               font-size:0.9rem;font-weight:bold;"';
+        $html .= '        onmouseover="this.style.background=\'rgba(255,255,255,0.35)\'"';
+        $html .= '        onmouseout="this.style.background=\'rgba(255,255,255,0.2)\'">✕</button>';
+
+        $html .= '    </div>';
         $html .= '  </div>';
+
+        // iframe cargado de forma diferida (src vacío; se asigna al primer clic)
+        $html .= '  <iframe id="sira-iframe" src="" data-src="' . $iframeSrc . '"';
+        $html .= '    style="width:100%;flex:1;border:none;background:#f5f5f5;"';
+        $html .= '    allow="clipboard-write" title="ChatSIRA"></iframe>';
+
         $html .= '</div>';
+
+        // ── FAB (botón burbuja): visible solo cuando el widget está minimizado ─
+        $html .= '<button id="sira-fab" onclick="openSiraWidget()" title="Abrir ChatSIRA"';
+        $html .= '  style="display:none;position:fixed;bottom:24px;right:24px;z-index:99999;';
+        $html .= '         width:56px;height:56px;border-radius:50%;background:#C8102E;';
+        $html .= '         border:none;color:#fff;cursor:pointer;';
+        $html .= '         box-shadow:0 4px 16px rgba(200,16,46,0.45);';
+        $html .= '         align-items:center;justify-content:center;"';
+        $html .= '  onmouseover="this.style.background=\'#a00d24\'"';
+        $html .= '  onmouseout="this.style.background=\'#C8102E\'">';
+        $html .= '  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">';
+        $html .= '    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>';
+        $html .= '  </svg>';
+        $html .= '</button>';
+
+        // ── JavaScript: carga diferida del iframe + control del widget ────────
+        $html .= '<script>';
+        $html .= '(function(){';
+        $html .= '  var loaded = false;';
+
+        $html .= '  window.openSiraWidget = function() {';
+        $html .= '    var w = document.getElementById("sira-widget");';
+        $html .= '    var fab = document.getElementById("sira-fab");';
+        $html .= '    var iframe = document.getElementById("sira-iframe");';
+        $html .= '    if (!loaded) { iframe.src = iframe.dataset.src; loaded = true; }';
+        $html .= '    w.style.display = "flex";';
+        $html .= '    fab.style.display = "none";';
+        $html .= '  };';
+
+        $html .= '  window.minimizeSiraWidget = function() {';
+        $html .= '    document.getElementById("sira-widget").style.display = "none";';
+        $html .= '    document.getElementById("sira-fab").style.display = "flex";';
+        $html .= '  };';
+
+        $html .= '  window.closeSiraWidget = function() {';
+        $html .= '    document.getElementById("sira-widget").style.display = "none";';
+        $html .= '    document.getElementById("sira-fab").style.display = "none";';
+        $html .= '  };';
+
+        $html .= '})();';
+        $html .= '</script>';
 
         return $html;
     }

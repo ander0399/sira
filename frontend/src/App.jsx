@@ -12,23 +12,31 @@ import AppLayout      from './components/layout/AppLayout';
 import Login            from './pages/Login';
 import Dashboard        from './pages/Dashboard';
 import TeacherDashboard from './pages/TeacherDashboard';
+import AdminDashboard   from './pages/AdminDashboard';
 import Chat             from './pages/Chat';
 import Reports          from './pages/Reports';
 import Profile          from './pages/Profile';
 
-/* Redirige al dashboard apropiado según el rol del usuario */
 function RootRedirect() {
   const user = useSelector((s) => s.auth.user);
   if (!user) return <Navigate to="/login" replace />;
-  return <Navigate to={user.role === 'teacher' ? '/teacher' : '/dashboard'} replace />;
+  if (user.role === 'teacher') return <Navigate to="/teacher"   replace />;
+  if (user.role === 'admin')   return <Navigate to="/admin"     replace />;
+  return <Navigate to="/dashboard" replace />;
 }
 
-/* Protege rutas exclusivas para docentes */
 function TeacherOnly() {
   const user = useSelector((s) => s.auth.user);
   if (!user) return <Navigate to="/login" replace />;
   if (user.role !== 'teacher') return <Navigate to="/dashboard" replace />;
   return <TeacherDashboard />;
+}
+
+function AdminOnly() {
+  const user = useSelector((s) => s.auth.user);
+  if (!user) return <Navigate to="/login" replace />;
+  if (user.role !== 'admin') return <Navigate to="/dashboard" replace />;
+  return <AdminDashboard />;
 }
 
 export default function App() {
@@ -43,6 +51,7 @@ export default function App() {
           <Route element={<AppLayout />}>
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/teacher"   element={<TeacherOnly />} />
+            <Route path="/admin"     element={<AdminOnly />} />
             <Route path="/chat"      element={<Chat />} />
             <Route path="/profile"   element={<Profile />} />
             <Route path="/reports"   element={<Reports />} />

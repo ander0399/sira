@@ -19,8 +19,8 @@ const TEACHER_NAV = [
 ];
 
 const ADMIN_NAV = [
-  { to: '/dashboard', icon: '🏠', label: 'Panel Admin' },
-  { to: '/reports',   icon: '📊', label: 'Reportes' },
+  { to: '/admin',   icon: '🛡️', label: 'Panel Admin' },
+  { to: '/reports', icon: '📊', label: 'Reportes' },
 ];
 
 export default function Sidebar({ isOpen, onClose }) {

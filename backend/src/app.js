@@ -24,6 +24,7 @@ app.use('/api/teacher',         require('./routes/teacher.routes'));
 app.use('/api/chat',            require('./routes/chat.routes'));
 app.use('/api/recommendations', require('./routes/recommendation.routes'));
 app.use('/api/feedback',        require('./routes/feedback.routes'));
+app.use('/api/admin',           require('./routes/admin.routes'));
 
 // ── Ruta de health check ──────────────────────────────────────────────────────
 app.get('/api/health', (req, res) => {
