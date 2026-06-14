@@ -1,6 +1,6 @@
 /**
- * Modelo User — representa a los usuarios del sistema (estudiantes y administradores).
- * La contraseña se almacena hasheada con bcrypt.
+ * Modelo User — representa únicamente a los administradores del sistema SIRA.
+ * Estudiantes y docentes se autentican vía Moodle SSO (ver MoodleSession).
  */
 
 const { DataTypes } = require('sequelize');
@@ -26,10 +26,9 @@ const User = sequelize.define('User', {
     type: DataTypes.STRING(255),
     allowNull: false,
   },
-  // 'student' para estudiantes de IS-UFPS, 'admin' para administradores
   role: {
-    type: DataTypes.ENUM('student', 'admin'),
-    defaultValue: 'student',
+    type: DataTypes.ENUM('admin'),
+    defaultValue: 'admin',
   },
 }, {
   tableName: 'users',

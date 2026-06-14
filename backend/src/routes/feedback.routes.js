@@ -8,10 +8,10 @@ const { body } = require('express-validator');
 const router = express.Router();
 
 const { submitFeedback, getFeedbackSummary } = require('../controllers/feedback.controller');
-const { verifyToken } = require('../middleware/auth.middleware');
+const { verifyToken, requireMoodleUser } = require('../middleware/auth.middleware');
 const { validate } = require('../middleware/validate.middleware');
 
-router.use(verifyToken);
+router.use(verifyToken, requireMoodleUser);
 
 // POST /api/feedback         → enviar calificación de una recomendación
 router.post('/', [

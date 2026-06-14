@@ -7,9 +7,9 @@ const express = require('express');
 const router = express.Router();
 
 const { getRecommendations, generateRecommendations, markAsRead } = require('../controllers/recommendation.controller');
-const { verifyToken } = require('../middleware/auth.middleware');
+const { verifyToken, requireMoodleUser } = require('../middleware/auth.middleware');
 
-router.use(verifyToken);
+router.use(verifyToken, requireMoodleUser);
 
 // GET  /api/recommendations           → listar recomendaciones del estudiante
 router.get('/', getRecommendations);

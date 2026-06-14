@@ -1,59 +1,80 @@
 /**
- * Controller de autenticación: registro, login y obtención del perfil propio.
+ * Controller de autenticación SIRA.
+ * - moodleLogin: valida token Moodle y emite JWT SIRA para estudiantes/docentes.
+ * - adminLogin: autenticación email+contraseña solo para Admin SIRA.
+ * - getMe: retorna el usuario autenticado según tipo de token.
  */
 
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-const { User, StudentProfile } = require('../models');
+const { User, MoodleSession } = require('../models');
+const moodleService = require('../services/moodle.service');
 require('dotenv').config();
 
 /**
- * POST /api/auth/register
- * Crea un nuevo usuario estudiante y su perfil académico inicial.
+ * POST /api/auth/moodle
+ * Recibe { moodleToken, role } del plugin Moodle.
+ * Valida el token contra la instancia Moodle y emite un JWT SIRA.
  */
-const register = async (req, res) => {
+const moodleLogin = async (req, res) => {
   try {
-    const { name, email, password, currentSemester, learningStyle, studentCode } = req.body;
+    const { moodleToken, role } = req.body;
 
-    const existing = await User.findOne({ where: { email } });
-    if (existing) {
-      return res.status(409).json({ message: 'El correo ya está registrado.' });
+    if (!moodleToken) {
+      return res.status(400).json({ message: 'El token de Moodle es requerido.' });
     }
 
-    const hashedPassword = await bcrypt.hash(password, 10);
+    const moodleRole = role === 'teacher' ? 'teacher' : 'student';
 
-    const user = await User.create({ name, email, password: hashedPassword, role: 'student' });
+    // Verifica el token con la API REST de Moodle
+    const siteInfo = await moodleService.getSiteInfo(moodleToken);
+    if (!siteInfo || !siteInfo.userid) {
+      return res.status(401).json({ message: 'Token de Moodle inválido o expirado.' });
+    }
 
-    await StudentProfile.create({
-      userId: user.id,
-      currentSemester: currentSemester || 1,
-      gpa: 0.0,
-      learningStyle: learningStyle || 'visual',
-      studentCode: studentCode || null,
-    });
+    // Actualiza o crea la sesión local del usuario Moodle
+    const [session] = await MoodleSession.upsert({
+      moodleUserId: siteInfo.userid,
+      moodleUsername: siteInfo.username,
+      fullName: siteInfo.fullname,
+      email: siteInfo.useremail || null,
+      role: moodleRole,
+      moodleToken,
+      lastLogin: new Date(),
+    }, { returning: true });
 
     const token = jwt.sign(
-      { id: user.id, email: user.email, role: user.role },
+      {
+        type: 'moodle',
+        moodleUserId: siteInfo.userid,
+        role: moodleRole,
+        fullName: siteInfo.fullname,
+        email: siteInfo.useremail || null,
+      },
       process.env.JWT_SECRET,
       { expiresIn: process.env.JWT_EXPIRES_IN }
     );
 
-    res.status(201).json({
-      message: 'Usuario registrado exitosamente.',
+    res.json({
+      message: 'Autenticación Moodle exitosa.',
       token,
-      user: { id: user.id, name: user.name, email: user.email, role: user.role },
+      user: {
+        moodleUserId: siteInfo.userid,
+        fullName: siteInfo.fullname,
+        role: moodleRole,
+      },
     });
   } catch (error) {
-    console.error('Error en registro:', error.message);
+    console.error('Error en moodleLogin:', error.message);
     res.status(500).json({ message: 'Error interno del servidor.' });
   }
 };
 
 /**
- * POST /api/auth/login
- * Autentica al usuario y retorna un JWT.
+ * POST /api/auth/admin/login
+ * Autenticación exclusiva para Admin SIRA con email y contraseña.
  */
-const login = async (req, res) => {
+const adminLogin = async (req, res) => {
   try {
     const { email, password } = req.body;
 
@@ -68,7 +89,7 @@ const login = async (req, res) => {
     }
 
     const token = jwt.sign(
-      { id: user.id, email: user.email, role: user.role },
+      { type: 'admin', id: user.id, email: user.email, role: 'admin' },
       process.env.JWT_SECRET,
       { expiresIn: process.env.JWT_EXPIRES_IN }
     );
@@ -76,32 +97,47 @@ const login = async (req, res) => {
     res.json({
       message: 'Login exitoso.',
       token,
-      user: { id: user.id, name: user.name, email: user.email, role: user.role },
+      user: { id: user.id, name: user.name, email: user.email, role: 'admin' },
     });
   } catch (error) {
-    console.error('Error en login:', error.message);
+    console.error('Error en adminLogin:', error.message);
     res.status(500).json({ message: 'Error interno del servidor.' });
   }
 };
 
 /**
  * GET /api/auth/me
- * Retorna la información del usuario autenticado con su perfil académico.
+ * Retorna la información del usuario autenticado (admin o Moodle).
  */
 const getMe = async (req, res) => {
   try {
-    const user = await User.findByPk(req.user.id, {
-      attributes: { exclude: ['password'] },
-      include: [{ association: 'profile' }],
+    if (req.user.type === 'admin') {
+      const user = await User.findByPk(req.user.id, {
+        attributes: { exclude: ['password'] },
+      });
+      if (!user) return res.status(404).json({ message: 'Usuario no encontrado.' });
+      return res.json({ user: { ...user.toJSON(), type: 'admin' } });
+    }
+
+    // Usuario Moodle
+    const session = await MoodleSession.findOne({
+      where: { moodleUserId: req.user.moodleUserId },
     });
+    if (!session) return res.status(404).json({ message: 'Sesión Moodle no encontrada.' });
 
-    if (!user) return res.status(404).json({ message: 'Usuario no encontrado.' });
-
-    res.json({ user });
+    res.json({
+      user: {
+        moodleUserId: session.moodleUserId,
+        fullName: session.fullName,
+        email: session.email,
+        role: session.role,
+        type: 'moodle',
+      },
+    });
   } catch (error) {
     console.error('Error en getMe:', error.message);
     res.status(500).json({ message: 'Error interno del servidor.' });
   }
 };
 
-module.exports = { register, login, getMe };
+module.exports = { moodleLogin, adminLogin, getMe };

@@ -1,0 +1,12 @@
+{
+  "name": "sira",
+  "version": "2.0.0",
+  "description": "SIRA - Sistema Inteligente de Recomendación Académica · UFPS",
+  "scripts": {
+    "start": "concurrently --names \"BACKEND,FRONTEND\" --prefix-colors \"blue,green\" --kill-others-on-fail \"npm --prefix backend start\" \"npm --prefix frontend run dev\"",
+    "dev":   "concurrently --names \"BACKEND,FRONTEND\" --prefix-colors \"blue,green\" --kill-others-on-fail \"npm --prefix backend run dev\" \"npm --prefix frontend run dev\""
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0"
+  }
+}

@@ -1,6 +1,6 @@
 /**
  * Modelo Recommendation — recomendaciones académicas generadas para el estudiante.
- * Pueden venir del motor de reglas, de Groq o de una combinación (hybrid).
+ * Vinculada al usuario de Moodle mediante moodleUserId (no FK interna).
  */
 
 const { DataTypes } = require('sequelize');
@@ -12,12 +12,11 @@ const Recommendation = sequelize.define('Recommendation', {
     primaryKey: true,
     autoIncrement: true,
   },
-  userId: {
+  // ID del usuario en Moodle — vinculación externa, sin FK a tabla interna
+  moodleUserId: {
     type: DataTypes.INTEGER,
     allowNull: false,
-    references: { model: 'users', key: 'id' },
   },
-  // Tipo de recomendación generada
   type: {
     type: DataTypes.ENUM('recurso', 'estrategia', 'ruta', 'alerta', 'refuerzo'),
     allowNull: false,
@@ -30,23 +29,24 @@ const Recommendation = sequelize.define('Recommendation', {
     type: DataTypes.TEXT,
     allowNull: false,
   },
-  // Materia relacionada (nullable: puede ser una recomendación general)
-  subjectId: {
+  // Curso de Moodle relacionado (nullable: puede ser recomendación general)
+  moodleCourseId: {
     type: DataTypes.INTEGER,
     allowNull: true,
-    references: { model: 'subjects', key: 'id' },
   },
-  // Qué generó la recomendación
+  moodleCourseName: {
+    type: DataTypes.STRING(300),
+    allowNull: true,
+  },
   source: {
     type: DataTypes.ENUM('rules', 'groq', 'hybrid'),
     defaultValue: 'rules',
   },
-  // Datos adicionales en JSON (ej: links, pasos, ejemplos)
+  // Datos adicionales en JSON (links, pasos, ejemplos)
   metadata: {
     type: DataTypes.JSONB,
     defaultValue: {},
   },
-  // Si el estudiante ya vio la recomendación
   isRead: {
     type: DataTypes.BOOLEAN,
     defaultValue: false,

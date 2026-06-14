@@ -8,10 +8,10 @@ const { body } = require('express-validator');
 const router = express.Router();
 
 const { sendMessage, getChatHistory, getChatSessions } = require('../controllers/chat.controller');
-const { verifyToken } = require('../middleware/auth.middleware');
+const { verifyToken, requireMoodleUser } = require('../middleware/auth.middleware');
 const { validate } = require('../middleware/validate.middleware');
 
-router.use(verifyToken);
+router.use(verifyToken, requireMoodleUser);
 
 // POST /api/chat/message   → enviar mensaje a ChatSIRA
 router.post('/message', [

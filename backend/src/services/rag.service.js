@@ -1,40 +1,59 @@
 /**
  * Servicio RAG (Retrieval-Augmented Generation).
- * Construye el contexto académico del estudiante que se inyecta al LLM
- * para que sus respuestas sean relevantes y personalizadas.
+ * Construye el contexto académico desde datos Moodle e inyecta al LLM.
+ *
+ * Contexto de entrada esperado (estudiante):
+ *   studentContext = {
+ *     profile:  { name, moodleUserId, role },
+ *     courses:  [{ id, fullname, shortname, progress }],
+ *     grades:   [{ courseId, courseName, items: [{ name, percentage }] }], // opcional
+ *     chatHistory: [{ role, content }],
+ *   }
  */
 
 const knowledgeBase = require('../data/knowledge');
+const { detectKBKey } = require('./rules.service');
 
 /**
- * Construye el prompt de sistema que define el comportamiento de SIRA
- * e inyecta el contexto académico del estudiante.
- * @param {Object} studentContext - Perfil y materias del estudiante
- * @returns {string} System prompt para el LLM
+ * Construye el prompt de sistema para estudiantes autenticados vía Moodle.
+ * @param {Object} studentContext
+ * @returns {string}
  */
 const buildSystemPrompt = (studentContext) => {
-  const { profile, subjects } = studentContext;
+  const { profile, courses = [], grades = [] } = studentContext;
 
-  // Materias en curso con sus códigos
-  const inProgressSubjects = subjects
-    .filter(s => s.status === 'en_curso')
-    .map(s => s.subject?.name)
-    .filter(Boolean)
+  const courseSummary = courses.length > 0
+    ? courses.map(c => {
+        const prog = c.progress !== null && c.progress !== undefined
+          ? `${c.progress}% completado`
+          : 'sin dato de progreso';
+        return `  • ${c.fullname} (${prog})`;
+      }).join('\n')
+    : '  No hay cursos registrados en Moodle.';
+
+  const atRiskCourses = courses
+    .filter(c => c.progress !== null && c.progress < 40)
+    .map(c => `${c.fullname} (${c.progress}%)`)
     .join(', ');
 
-  // Materias con bajo rendimiento o reprobadas
-  const atRiskSubjects = subjects
-    .filter(s => s.status === 'reprobada' || (s.grade !== null && s.grade < 3.2))
-    .map(s => `${s.subject?.name} (nota: ${s.grade ?? 'reprobada'})`)
-    .filter(Boolean)
-    .join(', ');
+  // Resumen de calificaciones si están disponibles
+  let gradesSummary = '';
+  if (grades.length > 0) {
+    gradesSummary = '\nCALIFICACIONES DISPONIBLES:\n' + grades.map(g => {
+      const items = g.items
+        .filter(i => i.percentage !== null)
+        .map(i => `    - ${i.name}: ${i.percentage}%`)
+        .join('\n');
+      return `  [${g.courseName}]\n${items || '    Sin calificaciones aún'}`;
+    }).join('\n');
+  }
 
-  // Contexto de las materias en curso para el RAG
-  const relevantKnowledge = subjects
-    .filter(s => s.status === 'en_curso' && s.subject?.code)
-    .map(s => {
-      const kb = knowledgeBase[s.subject.code];
-      if (!kb) return '';
+  // Conocimiento específico de las materias en curso
+  const relevantKnowledge = courses
+    .map(c => {
+      const kbKey = detectKBKey(c.fullname);
+      if (!kbKey) return '';
+      const kb = knowledgeBase[kbKey];
       return `
 [Materia: ${kb.name}]
 Temas principales: ${kb.topics.slice(0, 4).join(', ')}
@@ -48,20 +67,20 @@ Estrategias recomendadas: ${kb.studyStrategies.slice(0, 2).join('; ')}`;
 
 PERFIL DEL ESTUDIANTE ACTUAL:
 - Nombre: ${profile.name || 'Estudiante'}
-- Semestre actual: ${profile.currentSemester}
-- Promedio acumulado: ${profile.gpa}
-- Estilo de aprendizaje: ${profile.learningStyle}
-- Materias en curso: ${inProgressSubjects || 'No registradas'}
-- Materias en riesgo: ${atRiskSubjects || 'Ninguna'}
+- ID Moodle: ${profile.moodleUserId}
+- Cursos activos en Moodle:
+${courseSummary}
+- Cursos con bajo progreso: ${atRiskCourses || 'Ninguno'}
+${gradesSummary}
 
 CONOCIMIENTO ACADÉMICO DISPONIBLE:
-${relevantKnowledge || 'Sin materias específicas en curso.'}
+${relevantKnowledge || 'Sin materias del área de programación detectadas.'}
 
 INSTRUCCIONES DE COMPORTAMIENTO:
 1. Siempre responde en español, de manera clara, amigable y motivadora.
-2. Personaliza tus respuestas según el perfil del estudiante (semestre, promedio, estilo de aprendizaje).
-3. NUNCA resuelvas ejercicios o tareas directamente. Si el estudiante pide que lo hagas, explica conceptos, metodología y da ejemplos similares (no idénticos).
-4. Si el estudiante muestra señales de frustración o bajo rendimiento, sé empático y ofrece estrategias concretas.
+2. Personaliza tus respuestas según los cursos, el progreso y las calificaciones del estudiante en Moodle.
+3. NUNCA resuelvas ejercicios o tareas directamente. Explica conceptos, metodología y da ejemplos similares (no idénticos).
+4. Si el estudiante muestra bajo progreso o calificaciones bajas, sé empático y ofrece estrategias concretas.
 5. Cuando des recursos, verifica que sean gratuitos y accesibles.
 6. Mantén las respuestas concisas pero completas (máximo 300 palabras por respuesta).
 7. Usa emojis con moderación para hacer la conversación más amena.
@@ -69,32 +88,75 @@ INSTRUCCIONES DE COMPORTAMIENTO:
 };
 
 /**
- * Recupera el contexto relevante de la base de conocimiento según la consulta del usuario.
- * @param {string} query - Pregunta o mensaje del estudiante
- * @param {Array}  activeSubjectCodes - Códigos de materias en curso del estudiante
- * @returns {string} Fragmento de conocimiento relevante
+ * Construye el prompt de sistema para docentes autenticados vía Moodle.
+ * El docente usa SIRA como herramienta de análisis de sus estudiantes.
+ * @param {Object} teacherContext - { profile, courses }
+ * @returns {string}
  */
-const retrieveContext = (query, activeSubjectCodes = []) => {
+const buildTeacherSystemPrompt = (teacherContext) => {
+  const { profile, courses = [] } = teacherContext;
+
+  const courseSummary = courses.length > 0
+    ? courses.map(c => `  • ${c.fullname} (${c.shortname})`).join('\n')
+    : '  Sin cursos asignados.';
+
+  return `Eres SIRA (Sistema Inteligente de Recomendación Académica), asistente de análisis académico para docentes de la Universidad Francisco de Paula Santander (UFPS).
+
+DOCENTE ACTUAL:
+- Nombre: ${profile.name || 'Docente'}
+- ID Moodle: ${profile.moodleUserId}
+- Cursos a cargo:
+${courseSummary}
+
+ROL DEL DOCENTE EN SIRA:
+- Identificar estudiantes con bajo progreso o calificaciones en riesgo
+- Generar estrategias de intervención temprana
+- Consultar recomendaciones generadas para sus estudiantes
+- Analizar patrones de rendimiento en sus cursos
+
+INSTRUCCIONES DE COMPORTAMIENTO:
+1. Responde en español, con un tono profesional y analítico.
+2. Ayuda al docente a interpretar datos académicos de Moodle.
+3. Sugiere estrategias pedagógicas de intervención para estudiantes en riesgo.
+4. No compartas información personal de estudiantes más allá del contexto académico.
+5. Enfócate en acciones concretas y basadas en datos.
+6. Mantén las respuestas estructuradas y concisas (máximo 400 palabras).`;
+};
+
+/**
+ * Recupera contexto relevante del knowledge base según la consulta y cursos activos.
+ * @param {string} query
+ * @param {Array}  courses - Cursos del estudiante desde Moodle
+ * @returns {string}
+ */
+const retrieveContext = (query, courses = []) => {
   const queryLower = query.toLowerCase();
   const relevantSections = [];
 
-  // Mapeo de palabras clave a materias
   const keywordMap = {
-    FUND_PROG: ['programacion', 'algoritmo', 'variable', 'ciclo', 'función', 'python', 'c++', 'fundamentos'],
-    POO: ['objeto', 'clase', 'herencia', 'polimorfismo', 'encapsulamiento', 'java', 'poo', 'orientado'],
-    ESTR_DATOS: ['árbol', 'lista', 'pila', 'cola', 'grafo', 'hash', 'bfs', 'dfs', 'estructura', 'complejidad', 'big o'],
-    BD: ['sql', 'base de datos', 'tabla', 'join', 'consulta', 'normalización', 'relacional', 'postgresql'],
+    FUND_PROG:  ['programacion', 'algoritmo', 'variable', 'ciclo', 'funcion', 'python', 'c++', 'fundamentos'],
+    POO:        ['objeto', 'clase', 'herencia', 'polimorfismo', 'encapsulamiento', 'java', 'poo', 'orientado'],
+    ESTR_DATOS: ['arbol', 'lista', 'pila', 'cola', 'grafo', 'hash', 'bfs', 'dfs', 'estructura', 'complejidad', 'big o'],
+    BD:         ['sql', 'base de datos', 'tabla', 'join', 'consulta', 'normalizacion', 'relacional', 'postgresql'],
   };
 
+  const activeCourseKeys = courses.map(c => detectKBKey(c.fullname)).filter(Boolean);
+
   Object.entries(keywordMap).forEach(([code, keywords]) => {
-    const isRelevant = keywords.some(kw => queryLower.includes(kw)) || activeSubjectCodes.includes(code);
-    if (isRelevant && knowledgeBase[code]) {
+    // Normalizar query para comparación sin acentos
+    const normalizedQuery = queryLower.normalize('NFD').replace(/[̀-ͯ]/g, '');
+    const matchesQuery   = keywords.some(kw => normalizedQuery.includes(kw));
+    const matchesCourses = activeCourseKeys.includes(code);
+
+    if ((matchesQuery || matchesCourses) && knowledgeBase[code]) {
       const kb = knowledgeBase[code];
-      relevantSections.push(`[${kb.name}] Temas: ${kb.topics.slice(0, 3).join(', ')}. Estrategias: ${kb.studyStrategies.slice(0, 2).join('; ')}.`);
+      relevantSections.push(
+        `[${kb.name}] Temas: ${kb.topics.slice(0, 3).join(', ')}. Estrategias: ${kb.studyStrategies.slice(0, 2).join('; ')}.`
+      );
     }
   });
 
   return relevantSections.join('\n');
 };
 
-module.exports = { buildSystemPrompt, retrieveContext };
+module.exports = { buildSystemPrompt, buildTeacherSystemPrompt, retrieveContext };

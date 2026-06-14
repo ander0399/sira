@@ -1,0 +1,72 @@
+/* Estilos del bloque SIRA para Moodle */
+
+.block-sira-wrapper {
+    padding: 8px 4px;
+    font-family: inherit;
+}
+
+.sira-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+.sira-badge {
+    display: inline-block;
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    background-color: #1d4ed8;
+}
+
+/* Ícono verde para docente, azul para estudiante */
+.sira-icon-teacher {
+    background-color: #15803d;
+}
+
+.sira-icon-student {
+    background-color: #1d4ed8;
+}
+
+.sira-title {
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: #1e293b;
+    line-height: 1.2;
+}
+
+.sira-desc {
+    font-size: 0.8rem;
+    color: #475569;
+    margin: 0 0 12px 0;
+    line-height: 1.4;
+}
+
+.sira-btn {
+    display: block;
+    width: 100%;
+    text-align: center;
+    padding: 8px 12px;
+    border-radius: 6px;
+    font-size: 0.85rem;
+    font-weight: 500;
+    text-decoration: none;
+    transition: background-color 0.2s ease, transform 0.1s ease;
+    background-color: #1d4ed8;
+    color: #ffffff !important;
+    border: none;
+    cursor: pointer;
+}
+
+.sira-btn:hover {
+    background-color: #1e40af;
+    color: #ffffff !important;
+    text-decoration: none;
+    transform: translateY(-1px);
+}
+
+.sira-btn:active {
+    transform: translateY(0);
+}

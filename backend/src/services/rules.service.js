@@ -1,111 +1,151 @@
 /**
  * Motor de reglas académicas de SIRA.
- * Analiza el perfil del estudiante y genera recomendaciones basadas en reglas
- * predefinidas. Funciona sin necesidad de API de IA externa.
+ * Analiza los cursos y calificaciones Moodle del estudiante y genera
+ * recomendaciones basadas en reglas predefinidas.
+ *
+ * Contexto de entrada esperado:
+ *   studentContext = {
+ *     profile:  { name, moodleUserId, role },
+ *     courses:  [{ id, fullname, shortname, progress }],
+ *     grades:   [{ courseId, courseName, items: [{ name, percentage }] }], // opcional
+ *   }
  */
 
 const knowledgeBase = require('../data/knowledge');
 
+// BD antes que ESTR_DATOS para evitar que 'dato' en ESTR_DATOS capture cursos de BD
+const KB_KEYWORDS = {
+  BD:        ['base de dato', 'bases de dato', 'sql', 'base datos'],
+  FUND_PROG: ['fundamentos', 'introduccion', 'fund prog', 'algoritmos basicos'],
+  POO:       ['orientad', 'poo', 'programacion orientada'],
+  ESTR_DATOS:['estructur', 'algoritmos y estructura', 'estr datos'],
+};
+
+/** Elimina acentos para comparación robusta de nombres de cursos Moodle. */
+const normalize = (str) =>
+  str.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+
 /**
- * Genera recomendaciones para un estudiante según su perfil académico.
- * @param {Object} profile  - Perfil del estudiante (StudentProfile + subjects)
- * @param {Array}  subjects - Historial de materias del estudiante
- * @returns {Array} Lista de recomendaciones con tipo, título y descripción
+ * Detecta qué clave del KB corresponde al nombre completo de un curso Moodle.
+ * @param {string} courseName
+ * @returns {string|null}
  */
-const generateRecommendations = (profile, subjects) => {
+const detectKBKey = (courseName) => {
+  const normalized = normalize(courseName);
+  for (const [key, keywords] of Object.entries(KB_KEYWORDS)) {
+    if (keywords.some(kw => normalized.includes(normalize(kw)))) return key;
+  }
+  return null;
+};
+
+/**
+ * Genera recomendaciones para un estudiante según sus cursos y calificaciones Moodle.
+ * @param {Object} studentContext - { profile, courses, grades }
+ * @returns {Array}
+ */
+const generateRecommendations = (studentContext) => {
+  const { profile, courses = [], grades = [] } = studentContext;
   const recommendations = [];
 
-  // Materias en curso
-  const inProgress = subjects.filter(s => s.status === 'en_curso');
-  // Materias reprobadas
-  const failed = subjects.filter(s => s.status === 'reprobada');
-  // Materias del área de programación en riesgo
-  const highRiskInProgress = inProgress.filter(s => s.subject && s.subject.isHighRisk);
+  const lowProgressCourses  = courses.filter(c => c.progress !== null && c.progress !== undefined && c.progress < 40);
+  const goodProgressCourses = courses.filter(c => c.progress !== null && c.progress !== undefined && c.progress >= 75);
 
-  // ── Regla 1: Promedio bajo ────────────────────────────────────────────────
-  if (profile.gpa < 3.2 && profile.gpa > 0) {
+  // ── Regla 1: Cursos con progreso bajo ────────────────────────────────────
+  lowProgressCourses.forEach(course => {
+    const kbKey = detectKBKey(course.fullname);
+    const kb = kbKey ? knowledgeBase[kbKey] : null;
+
     recommendations.push({
       type: 'alerta',
-      title: 'Tu promedio requiere atención',
-      description: knowledgeBase.GENERAL.alertMessages.lowGpa,
+      title: `Bajo progreso en ${course.fullname}`,
+      description: `Tu avance es del ${course.progress}%. ${knowledgeBase.GENERAL.alertMessages.highRiskSubject}${kb ? ` Temas clave: ${kb.topics.slice(0, 3).join(', ')}.` : ''}`,
+      moodleCourseId: course.id,
+      moodleCourseName: course.fullname,
       source: 'rules',
     });
-
-    recommendations.push({
-      type: 'estrategia',
-      title: 'Técnicas de estudio para mejorar tu promedio',
-      description: `Con un promedio de ${profile.gpa}, aquí hay estrategias clave: ${knowledgeBase.GENERAL.studyStrategies.slice(0, 3).join(' | ')}`,
-      source: 'rules',
-    });
-  }
-
-  // ── Regla 2: Materia de alto riesgo en curso ──────────────────────────────
-  highRiskInProgress.forEach(studentSubject => {
-    const subjectCode = studentSubject.subject.code;
-    const kb = knowledgeBase[subjectCode];
 
     if (kb) {
       recommendations.push({
-        type: 'alerta',
-        title: `Atención: ${studentSubject.subject.name} es una materia de alta dificultad`,
-        description: `${knowledgeBase.GENERAL.alertMessages.highRiskSubject} Errores frecuentes en esta materia: ${kb.commonMistakes.slice(0, 2).join('; ')}.`,
-        subjectCode,
-        source: 'rules',
-      });
-
-      recommendations.push({
         type: 'recurso',
-        title: `Recursos recomendados para ${studentSubject.subject.name}`,
-        description: `Recursos para reforzar: ${kb.resources.map(r => r.title).join(', ')}.`,
-        subjectCode,
+        title: `Recursos recomendados para ${course.fullname}`,
+        description: `Para reforzar este curso: ${kb.resources.map(r => r.title).join(', ')}.`,
+        moodleCourseId: course.id,
+        moodleCourseName: course.fullname,
         metadata: { resources: kb.resources },
         source: 'rules',
       });
     }
   });
 
-  // ── Regla 3: Materia reprobada que debe repetir ───────────────────────────
-  failed.forEach(studentSubject => {
-    const subjectCode = studentSubject.subject?.code;
-    const kb = knowledgeBase[subjectCode];
+  // ── Regla 2: Calificaciones bajas (< 60%) en un curso ────────────────────
+  grades.forEach(gradeEntry => {
+    const lowGradeItems = gradeEntry.items.filter(i => i.percentage !== null && i.percentage < 60);
+    if (lowGradeItems.length === 0) return;
+
+    const kbKey = detectKBKey(gradeEntry.courseName);
+    const kb = kbKey ? knowledgeBase[kbKey] : null;
 
     recommendations.push({
-      type: 'refuerzo',
-      title: `Plan de refuerzo: ${studentSubject.subject?.name}`,
-      description: `${knowledgeBase.GENERAL.alertMessages.repeatingSubject}${kb ? ` Temas clave a trabajar: ${kb.topics.slice(0, 3).join(', ')}.` : ''}`,
-      subjectCode,
+      type: 'alerta',
+      title: `Calificaciones bajas en ${gradeEntry.courseName}`,
+      description: `Tienes ${lowGradeItems.length} actividad(es) con menos del 60%: ${lowGradeItems.map(i => `${i.name} (${i.percentage}%)`).join(', ')}.${kb ? ` Errores comunes: ${kb.commonMistakes[0]}.` : ''}`,
+      moodleCourseId: gradeEntry.courseId,
+      moodleCourseName: gradeEntry.courseName,
+      source: 'rules',
+    });
+
+    if (kb) {
+      recommendations.push({
+        type: 'estrategia',
+        title: `Estrategias para mejorar en ${gradeEntry.courseName}`,
+        description: kb.studyStrategies.slice(0, 3).join(' | '),
+        moodleCourseId: gradeEntry.courseId,
+        moodleCourseName: gradeEntry.courseName,
+        source: 'rules',
+      });
+    }
+  });
+
+  // ── Regla 3: Varios cursos en bajo progreso → alerta de carga académica ──
+  if (lowProgressCourses.length >= 2) {
+    recommendations.push({
+      type: 'estrategia',
+      title: 'Gestiona tu carga académica',
+      description: `Tienes ${lowProgressCourses.length} cursos con bajo progreso. ${knowledgeBase.GENERAL.studyStrategies.slice(0, 3).join(' | ')}`,
+      source: 'rules',
+    });
+  }
+
+  // ── Regla 4: Cursos con buen progreso → refuerzo positivo ────────────────
+  goodProgressCourses.forEach(course => {
+    const kbKey = detectKBKey(course.fullname);
+    const kb = kbKey ? knowledgeBase[kbKey] : null;
+    const nextTopics = kb ? kb.topics.slice(4, 6).join(', ') : '';
+
+    recommendations.push({
+      type: 'ruta',
+      title: `¡Buen avance en ${course.fullname}!`,
+      description: `Llevas un ${course.progress}% de progreso.${nextTopics ? ` Temas que vienen: ${nextTopics}.` : ' ¡Sigue así!'}`,
+      moodleCourseId: course.id,
+      moodleCourseName: course.fullname,
       source: 'rules',
     });
   });
 
-  // ── Regla 4: Estilo de aprendizaje visual ────────────────────────────────
-  if (profile.learningStyle === 'visual') {
-    recommendations.push({
-      type: 'estrategia',
-      title: 'Recursos visuales para tu estilo de aprendizaje',
-      description: 'Como aprendiz visual, te beneficiarás de: VisuAlgo para algoritmos (https://visualgo.net), diagramas de flujo para lógica, y videos en YouTube antes de leer texto.',
-      source: 'rules',
-    });
-  }
-
-  // ── Regla 5: Ruta de aprendizaje para el semestre siguiente ──────────────
-  if (profile.currentSemester <= 3) {
-    const nextSemester = profile.currentSemester + 1;
-    recommendations.push({
-      type: 'ruta',
-      title: `Planifica tu semestre ${nextSemester}`,
-      description: `Para prepararte para el semestre ${nextSemester}, asegúrate de dominar bien los fundamentos actuales antes de avanzar a materias más complejas.`,
-      source: 'rules',
-    });
-  }
+  // ── Regla 5: Estrategias generales (siempre se incluye una) ──────────────
+  recommendations.push({
+    type: 'estrategia',
+    title: 'Técnicas de estudio recomendadas',
+    description: knowledgeBase.GENERAL.studyStrategies.slice(0, 3).join(' | '),
+    source: 'rules',
+  });
 
   return recommendations;
 };
 
 /**
- * Detecta si el mensaje del usuario intenta que SIRA resuelva un ejercicio directamente.
- * Implementa la restricción pedagógica del anteproyecto.
- * @param {string} message - Mensaje del estudiante
+ * Detecta si el mensaje intenta que SIRA resuelva un ejercicio directamente.
+ * @param {string} message
  * @returns {boolean}
  */
 const isExerciseRequest = (message) => {
@@ -115,13 +155,11 @@ const isExerciseRequest = (message) => {
     'dame la solución', 'completa el ejercicio', 'termina el código',
     'cuál es la respuesta del', 'dime la respuesta',
   ];
-
-  const lowerMessage = message.toLowerCase();
-  return exerciseKeywords.some(keyword => lowerMessage.includes(keyword));
+  return exerciseKeywords.some(kw => message.toLowerCase().includes(kw));
 };
 
 /**
- * Genera la respuesta de redirección cuando se detecta un intento de obtener respuestas directas.
+ * Respuesta de redirección cuando se detecta solicitud de respuesta directa.
  * @returns {string}
  */
 const getExerciseRedirectResponse = () => {
@@ -140,4 +178,5 @@ module.exports = {
   generateRecommendations,
   isExerciseRequest,
   getExerciseRedirectResponse,
+  detectKBKey,
 };

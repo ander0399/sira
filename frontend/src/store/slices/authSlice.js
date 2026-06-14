@@ -1,40 +1,44 @@
 /**
- * Slice de autenticación.
- * Maneja el usuario autenticado, el token JWT y el estado de carga del login.
+ * Slice de autenticación SIRA v2.
+ * Soporta dos flujos:
+ *   - Moodle SSO (estudiantes y docentes): token Moodle → JWT SIRA
+ *   - Admin SIRA: email + contraseña → JWT SIRA
+ * Persiste token, usuario y moodleToken en localStorage.
  */
 
 import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
 import api from '../../services/api';
 
-/* Carga inicial desde localStorage para persistir sesión entre recargas */
-const savedUser  = JSON.parse(localStorage.getItem('sira_user')  || 'null');
-const savedToken = localStorage.getItem('sira_token') || null;
+const savedUser        = JSON.parse(localStorage.getItem('sira_user')         || 'null');
+const savedToken       = localStorage.getItem('sira_token')                   || null;
+const savedMoodleToken = localStorage.getItem('sira_moodle_token')            || null;
 
-/* Thunk: login */
-export const loginUser = createAsyncThunk('auth/login', async (credentials, { rejectWithValue }) => {
+/* Thunk: autenticación Moodle SSO (estudiantes y docentes) */
+export const moodleLogin = createAsyncThunk('auth/moodleLogin', async ({ moodleToken, role }, { rejectWithValue }) => {
   try {
-    const { data } = await api.post('/auth/login', credentials);
-    localStorage.setItem('sira_token', data.token);
-    localStorage.setItem('sira_user', JSON.stringify(data.user));
-    return data;
+    const { data } = await api.post('/auth/moodle', { moodleToken, role });
+    localStorage.setItem('sira_token',        data.token);
+    localStorage.setItem('sira_user',         JSON.stringify(data.user));
+    localStorage.setItem('sira_moodle_token', moodleToken);
+    return { ...data, moodleToken };
   } catch (err) {
-    return rejectWithValue(err.response?.data?.message || 'Error al iniciar sesión.');
+    return rejectWithValue(err.response?.data?.message || 'Token Moodle inválido o expirado.');
   }
 });
 
-/* Thunk: registro */
-export const registerUser = createAsyncThunk('auth/register', async (userData, { rejectWithValue }) => {
+/* Thunk: autenticación Admin SIRA (email + contraseña) */
+export const adminLogin = createAsyncThunk('auth/adminLogin', async (credentials, { rejectWithValue }) => {
   try {
-    const { data } = await api.post('/auth/register', userData);
+    const { data } = await api.post('/auth/admin/login', credentials);
     localStorage.setItem('sira_token', data.token);
-    localStorage.setItem('sira_user', JSON.stringify(data.user));
+    localStorage.setItem('sira_user',  JSON.stringify(data.user));
     return data;
   } catch (err) {
-    return rejectWithValue(err.response?.data?.message || 'Error al registrarse.');
+    return rejectWithValue(err.response?.data?.message || 'Credenciales inválidas.');
   }
 });
 
-/* Thunk: obtener datos del usuario autenticado */
+/* Thunk: refrescar datos del usuario autenticado */
 export const fetchMe = createAsyncThunk('auth/me', async (_, { rejectWithValue }) => {
   try {
     const { data } = await api.get('/auth/me');
@@ -47,46 +51,46 @@ export const fetchMe = createAsyncThunk('auth/me', async (_, { rejectWithValue }
 const authSlice = createSlice({
   name: 'auth',
   initialState: {
-    user:    savedUser,
-    token:   savedToken,
-    loading: false,
-    error:   null,
+    user:        savedUser,
+    token:       savedToken,
+    moodleToken: savedMoodleToken,
+    loading:     false,
+    error:       null,
   },
   reducers: {
     logout(state) {
-      state.user  = null;
-      state.token = null;
+      state.user        = null;
+      state.token       = null;
+      state.moodleToken = null;
       localStorage.removeItem('sira_token');
       localStorage.removeItem('sira_user');
+      localStorage.removeItem('sira_moodle_token');
     },
-    clearError(state) {
-      state.error = null;
-    },
+    clearError(state) { state.error = null; },
   },
   extraReducers: (builder) => {
     const setPending  = (state) => { state.loading = true;  state.error = null; };
     const setRejected = (state, action) => { state.loading = false; state.error = action.payload; };
 
     builder
-      .addCase(loginUser.pending,    setPending)
-      .addCase(loginUser.fulfilled,  (state, { payload }) => {
+      .addCase(moodleLogin.pending,   setPending)
+      .addCase(moodleLogin.fulfilled, (state, { payload }) => {
+        state.loading     = false;
+        state.user        = payload.user;
+        state.token       = payload.token;
+        state.moodleToken = payload.moodleToken;
+      })
+      .addCase(moodleLogin.rejected,  setRejected)
+
+      .addCase(adminLogin.pending,   setPending)
+      .addCase(adminLogin.fulfilled, (state, { payload }) => {
         state.loading = false;
         state.user    = payload.user;
         state.token   = payload.token;
       })
-      .addCase(loginUser.rejected,   setRejected)
+      .addCase(adminLogin.rejected, setRejected)
 
-      .addCase(registerUser.pending,   setPending)
-      .addCase(registerUser.fulfilled, (state, { payload }) => {
-        state.loading = false;
-        state.user    = payload.user;
-        state.token   = payload.token;
-      })
-      .addCase(registerUser.rejected,  setRejected)
-
-      .addCase(fetchMe.fulfilled, (state, { payload }) => {
-        state.user = payload;
-      });
+      .addCase(fetchMe.fulfilled, (state, { payload }) => { state.user = payload; });
   },
 });
 

@@ -42,7 +42,7 @@ export default function Chat() {
       {/* Header del chat */}
       <div className="flex items-center justify-between px-5 py-3 border-b border-gray-100 bg-gray-50 flex-shrink-0">
         <div className="flex items-center gap-3">
-          <img src="/logo.jpeg" alt="SIRA" className="w-9 h-9 rounded-full object-cover" />
+          <img src="/logo.jpeg" alt="SIRA" className="w-9 h-9 rounded-full object-cover shrink-0 shadow" />
           <div>
             <p className="font-bold text-secondary text-sm">ChatSIRA</p>
             <p className="text-xs text-gray-400">

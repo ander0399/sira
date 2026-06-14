@@ -11,18 +11,20 @@ const { Feedback, Recommendation } = require('../models');
 const submitFeedback = async (req, res) => {
   try {
     const { recommendationId, rating, comment } = req.body;
+    const moodleUserId = req.user.moodleUserId;
 
+    // Verificar que la recomendación pertenece al usuario
     const recommendation = await Recommendation.findOne({
-      where: { id: recommendationId, userId: req.user.id },
+      where: { id: recommendationId, moodleUserId },
     });
 
     if (!recommendation) {
       return res.status(404).json({ message: 'Recomendación no encontrada.' });
     }
 
-    // Verificar si ya existe feedback para esta recomendación
+    // Actualizar feedback existente o crear uno nuevo
     const existing = await Feedback.findOne({
-      where: { userId: req.user.id, recommendationId },
+      where: { moodleUserId, recommendationId },
     });
 
     if (existing) {
@@ -31,7 +33,7 @@ const submitFeedback = async (req, res) => {
     }
 
     const feedback = await Feedback.create({
-      userId: req.user.id,
+      moodleUserId,
       recommendationId,
       rating,
       comment: comment || null,
@@ -47,12 +49,12 @@ const submitFeedback = async (req, res) => {
 
 /**
  * GET /api/feedback/summary
- * Retorna un resumen del feedback del estudiante (para el reporte básico).
+ * Retorna un resumen del feedback del estudiante.
  */
 const getFeedbackSummary = async (req, res) => {
   try {
     const feedbacks = await Feedback.findAll({
-      where: { userId: req.user.id },
+      where: { moodleUserId: req.user.moodleUserId },
       include: [{ association: 'recommendation', attributes: ['title', 'type'] }],
     });
 

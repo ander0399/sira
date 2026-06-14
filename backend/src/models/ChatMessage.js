@@ -12,10 +12,10 @@ const ChatMessage = sequelize.define('ChatMessage', {
     primaryKey: true,
     autoIncrement: true,
   },
-  userId: {
+  // ID del usuario en Moodle — vinculación externa, sin FK a tabla interna
+  moodleUserId: {
     type: DataTypes.INTEGER,
     allowNull: false,
-    references: { model: 'users', key: 'id' },
   },
   // 'user' para mensajes del estudiante, 'assistant' para respuestas de SIRA
   role: {

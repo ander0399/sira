@@ -21,5 +21,14 @@ rad.json
 *.flf
 #Test results file
 TestResults.xml
-sira_anteproyecto.docx
-sira_observaciones.docx
+
+#dependencias
+node_modules/
+
+#entorno
+.env
+.env.example
+
+#docs
+SIRA_Anteproyecto.pdf
+reglas.txt

@@ -1,40 +1,47 @@
 /**
- * Servicio orquestador de recomendaciones.
- * Combina el motor de reglas con Groq (si está disponible)
- * para generar recomendaciones híbridas o solo basadas en reglas.
+ * Servicio orquestador de recomendaciones y chat SIRA.
+ * Combina el motor de reglas con Groq para generar respuestas híbridas.
+ *
+ * Contexto de entrada esperado:
+ *   studentContext = {
+ *     profile:     { name, moodleUserId, role },
+ *     courses:     [{ id, fullname, shortname, progress }],
+ *     grades:      [{ courseId, courseName, items: [{ name, percentage }] }], // opcional
+ *     chatHistory: [{ role, content }],
+ *   }
  */
 
 const { generateRecommendations, isExerciseRequest, getExerciseRedirectResponse } = require('./rules.service');
-const { buildSystemPrompt, retrieveContext } = require('./rag.service');
+const { buildSystemPrompt, buildTeacherSystemPrompt, retrieveContext } = require('./rag.service');
 const { sendToGroq, isGroqAvailable } = require('./groq.service');
 const { Recommendation } = require('../models');
 
 /**
- * Procesa un mensaje del chatbot y genera la respuesta de SIRA.
- * @param {string} userMessage     - Mensaje del estudiante
- * @param {Object} studentContext  - { profile, subjects, chatHistory }
+ * Procesa un mensaje de chat y genera la respuesta de SIRA.
+ * Soporta rol 'student' y 'teacher' — cada uno usa un prompt distinto.
+ *
+ * @param {string} userMessage
+ * @param {Object} studentContext - { profile, courses, grades, chatHistory }
  * @returns {{ response: string, source: string }}
  */
 const processChat = async (userMessage, studentContext) => {
-  // Restricción pedagógica: detectar peticiones de resolución directa de ejercicios
-  if (isExerciseRequest(userMessage)) {
-    return {
-      response: getExerciseRedirectResponse(),
-      source: 'rules',
-    };
+  const { profile } = studentContext;
+
+  // Restricción pedagógica: no resolver ejercicios directamente (solo para estudiantes)
+  if (profile.role === 'student' && isExerciseRequest(userMessage)) {
+    return { response: getExerciseRedirectResponse(), source: 'rules' };
   }
 
-  // Construir el sistema RAG con el perfil del estudiante
-  const systemPrompt = buildSystemPrompt(studentContext);
+  // Seleccionar prompt según el rol del usuario
+  const systemPrompt = profile.role === 'teacher'
+    ? buildTeacherSystemPrompt(studentContext)
+    : buildSystemPrompt(studentContext);
 
-  // Si Groq está disponible, usar el LLM para responder
   if (isGroqAvailable()) {
-    const activeSubjectCodes = studentContext.subjects
-      .filter(s => s.status === 'en_curso' && s.subject?.code)
-      .map(s => s.subject.code);
+    const ragContext = profile.role === 'student'
+      ? retrieveContext(userMessage, studentContext.courses || [])
+      : '';
 
-    // Recuperar contexto relevante del knowledge base para enriquecer la respuesta
-    const ragContext = retrieveContext(userMessage, activeSubjectCodes);
     const enrichedPrompt = ragContext
       ? `${systemPrompt}\n\nCONTEXTO ADICIONAL RELEVANTE:\n${ragContext}`
       : systemPrompt;
@@ -45,77 +52,87 @@ const processChat = async (userMessage, studentContext) => {
       userMessage
     );
 
-    if (aiResponse) {
-      return { response: aiResponse, source: 'groq' };
-    }
+    if (aiResponse) return { response: aiResponse, source: 'groq' };
   }
 
-  // Fallback: respuesta del motor de reglas cuando Groq no está disponible
+  // Fallback: motor de reglas
   return generateRulesBasedChatResponse(userMessage, studentContext);
 };
 
 /**
- * Genera una respuesta de chat basada únicamente en el motor de reglas.
- * Se activa cuando Groq no está disponible.
- * @param {string} message - Mensaje del estudiante
- * @param {Object} context - Contexto del estudiante
+ * Genera respuesta de chat por reglas cuando Groq no está disponible.
+ * @param {string} message
+ * @param {Object} context - { profile, courses, grades }
  * @returns {{ response: string, source: string }}
  */
 const generateRulesBasedChatResponse = (message, context) => {
-  const { profile, subjects } = context;
+  const { profile, courses = [], grades = [] } = context;
   const msgLower = message.toLowerCase();
 
-  // Saludos
+  if (profile.role === 'teacher') {
+    return {
+      response: `Hola, **${profile.name}**. Soy SIRA, tu asistente de análisis académico.\n\nActualmente tienes **${courses.length} curso(s)** en Moodle. Para obtener recomendaciones detalladas sobre el rendimiento de tus estudiantes, la IA avanzada no está disponible en este momento.\n\n¿Qué aspecto del rendimiento de tus cursos te gustaría analizar?`,
+      source: 'rules',
+    };
+  }
+
+  // Saludos — estudiante
   if (['hola', 'hi', 'buenos', 'buenas', 'hey'].some(w => msgLower.includes(w))) {
     return {
-      response: `¡Hola! 👋 Soy **SIRA**, tu asistente académico de Ingeniería de Sistemas - UFPS.\n\nEstoy aquí para ayudarte con orientación sobre tus materias de programación. Actualmente estás en semestre **${profile.currentSemester}** con un promedio de **${profile.gpa}**.\n\n¿En qué puedo orientarte hoy?`,
+      response: `¡Hola! 👋 Soy **SIRA**, tu asistente académico de Ingeniería de Sistemas - UFPS.\n\nEstás inscrito en **${courses.length} curso(s)** en Moodle. Estoy aquí para ayudarte con orientación sobre tus materias.\n\n¿En qué puedo orientarte hoy?`,
       source: 'rules',
     };
   }
 
-  // Consulta sobre promedio
-  if (msgLower.includes('promedio') || msgLower.includes('notas')) {
-    const status = profile.gpa >= 3.5 ? 'excelente' : profile.gpa >= 3.0 ? 'aprobatorio' : 'que necesita mejorar';
+  // Consulta sobre progreso o notas
+  if (['progreso', 'notas', 'como voy', 'calificacion'].some(w => msgLower.includes(w))) {
+    const lowCourses = courses.filter(c => c.progress !== null && c.progress < 40);
+    const lowGradeCourses = grades.filter(g => g.items.some(i => i.percentage !== null && i.percentage < 60));
+
+    if (lowCourses.length > 0 || lowGradeCourses.length > 0) {
+      const problems = [
+        ...lowCourses.map(c => `${c.fullname} (progreso: ${c.progress}%)`),
+        ...lowGradeCourses.map(g => `${g.courseName} (calificaciones bajas)`),
+      ];
+      return {
+        response: `Según tu perfil en Moodle, necesitas atención en: **${problems.join(', ')}**.\n\n¿Quieres estrategias para alguno de estos cursos en particular?`,
+        source: 'rules',
+      };
+    }
     return {
-      response: `Tu promedio acumulado es **${profile.gpa}**, lo que es ${status}. ${profile.gpa < 3.2 ? 'Te recomiendo revisar tus estrategias de estudio. ¿Quieres que te sugiera algunas?' : '¡Sigue así! ¿Hay alguna materia en la que quieras enfocarte más?'}`,
+      response: `Tu progreso en Moodle se ve bien. Tienes **${courses.length} curso(s)** activos. ¿Hay algún tema específico en que quieras refuerzo?`,
       source: 'rules',
     };
   }
 
-  // Respuesta genérica cuando no hay Groq
+  // Respuesta genérica sin Groq
   return {
-    response: `Entiendo tu consulta sobre **"${message}"**. \n\nActualmente estoy operando en modo básico (sin IA avanzada). Puedo orientarte sobre:\n• Estrategias de estudio para tus materias\n• Recursos y materiales de apoyo\n• Tu perfil académico y recomendaciones\n\n¿Sobre cuál de estos temas quieres que te oriente? 📚`,
+    response: `Entiendo tu consulta sobre **"${message}"**.\n\nActualmente estoy operando en modo básico. Puedo orientarte sobre:\n• Estrategias de estudio para tus cursos actuales\n• Recursos y materiales de apoyo por materia\n• Tu progreso y calificaciones en Moodle\n\n¿Sobre cuál de estos temas quieres orientación? 📚`,
     source: 'rules',
   };
 };
 
 /**
- * Genera y persiste recomendaciones académicas para un estudiante.
- * @param {number} userId   - ID del usuario
- * @param {Object} profile  - Perfil académico del estudiante
- * @param {Array}  subjects - Historial de materias
- * @returns {Array} Recomendaciones creadas
+ * Genera y persiste recomendaciones para un estudiante Moodle.
+ * @param {number} moodleUserId
+ * @param {Object} studentContext - { profile, courses, grades }
+ * @returns {Array}
  */
-const generateAndSaveRecommendations = async (userId, profile, subjects) => {
-  const rawRecommendations = generateRecommendations(profile, subjects);
-
-  // Buscar el subjectId si la recomendación tiene subjectCode
-  const { Subject } = require('../models');
-  const allSubjects = await Subject.findAll();
-  const subjectMap = Object.fromEntries(allSubjects.map(s => [s.code, s.id]));
+const generateAndSaveRecommendations = async (moodleUserId, studentContext) => {
+  const rawRecommendations = generateRecommendations(studentContext);
 
   const toCreate = rawRecommendations.map(rec => ({
-    userId,
+    moodleUserId,
     type: rec.type,
     title: rec.title,
     description: rec.description,
-    subjectId: rec.subjectCode ? (subjectMap[rec.subjectCode] || null) : null,
+    moodleCourseId:   rec.moodleCourseId   || null,
+    moodleCourseName: rec.moodleCourseName || null,
     source: rec.source || 'rules',
     metadata: rec.metadata || {},
   }));
 
-  const created = await Recommendation.bulkCreate(toCreate);
-  return created;
+  return Recommendation.bulkCreate(toCreate);
 };
 
 module.exports = { processChat, generateAndSaveRecommendations };

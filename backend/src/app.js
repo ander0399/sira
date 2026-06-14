@@ -11,7 +11,7 @@ const app = express();
 
 // ── Middlewares globales ──────────────────────────────────────────────────────
 app.use(cors({
-  origin: process.env.FRONTEND_URL || 'http://localhost:5173', // puerto por defecto de Vite
+  origin: process.env.FRONTEND_URL || 'http://localhost:5173',
   credentials: true,
 }));
 app.use(express.json());
@@ -19,7 +19,8 @@ app.use(express.urlencoded({ extended: true }));
 
 // ── Rutas de la API ───────────────────────────────────────────────────────────
 app.use('/api/auth',            require('./routes/auth.routes'));
-app.use('/api/student',         require('./routes/student.routes'));
+app.use('/api/moodle',          require('./routes/moodle.routes'));
+app.use('/api/teacher',         require('./routes/teacher.routes'));
 app.use('/api/chat',            require('./routes/chat.routes'));
 app.use('/api/recommendations', require('./routes/recommendation.routes'));
 app.use('/api/feedback',        require('./routes/feedback.routes'));
@@ -29,7 +30,7 @@ app.get('/api/health', (req, res) => {
   res.json({
     status: 'ok',
     system: 'SIRA - Sistema Inteligente de Recomendación Académica',
-    version: '1.0.0',
+    version: '2.0.0',
     timestamp: new Date().toISOString(),
   });
 });

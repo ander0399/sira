@@ -1,55 +1,37 @@
 /**
  * Punto central de modelos: importa todos los modelos y define las relaciones
- * (asociaciones) entre ellos para que Sequelize construya los JOINs correctamente.
+ * entre ellos. Los usuarios Moodle (estudiantes/docentes) se vinculan por
+ * moodleUserId (entero externo), no por FK a la tabla users.
  */
 
 const sequelize = require('../config/database');
 
-const User            = require('./User');
-const StudentProfile  = require('./StudentProfile');
-const Subject         = require('./Subject');
-const StudentSubject  = require('./StudentSubject');
-const ChatMessage     = require('./ChatMessage');
-const Recommendation  = require('./Recommendation');
-const Feedback        = require('./Feedback');
+const User           = require('./User');
+const MoodleSession  = require('./MoodleSession');
+const ChatMessage    = require('./ChatMessage');
+const Recommendation = require('./Recommendation');
+const Feedback       = require('./Feedback');
 
-// Un usuario tiene un perfil académico
-User.hasOne(StudentProfile, { foreignKey: 'userId', as: 'profile' });
-StudentProfile.belongsTo(User, { foreignKey: 'userId', as: 'user' });
+// Una sesión Moodle tiene muchos mensajes de chat (por moodleUserId)
+MoodleSession.hasMany(ChatMessage, { foreignKey: 'moodleUserId', sourceKey: 'moodleUserId', as: 'messages' });
+ChatMessage.belongsTo(MoodleSession, { foreignKey: 'moodleUserId', targetKey: 'moodleUserId', as: 'session' });
 
-// Un perfil tiene muchas relaciones con materias (historial)
-StudentProfile.hasMany(StudentSubject, { foreignKey: 'studentProfileId', as: 'subjects' });
-StudentSubject.belongsTo(StudentProfile, { foreignKey: 'studentProfileId', as: 'profile' });
+// Una sesión Moodle tiene muchas recomendaciones
+MoodleSession.hasMany(Recommendation, { foreignKey: 'moodleUserId', sourceKey: 'moodleUserId', as: 'recommendations' });
+Recommendation.belongsTo(MoodleSession, { foreignKey: 'moodleUserId', targetKey: 'moodleUserId', as: 'session' });
 
-// Una materia puede estar en muchos historiales de estudiantes
-Subject.hasMany(StudentSubject, { foreignKey: 'subjectId', as: 'studentRecords' });
-StudentSubject.belongsTo(Subject, { foreignKey: 'subjectId', as: 'subject' });
+// Una sesión Moodle da feedback sobre recomendaciones
+MoodleSession.hasMany(Feedback, { foreignKey: 'moodleUserId', sourceKey: 'moodleUserId', as: 'feedbacks' });
+Feedback.belongsTo(MoodleSession, { foreignKey: 'moodleUserId', targetKey: 'moodleUserId', as: 'session' });
 
-// Un usuario tiene muchos mensajes de chat
-User.hasMany(ChatMessage, { foreignKey: 'userId', as: 'messages' });
-ChatMessage.belongsTo(User, { foreignKey: 'userId', as: 'user' });
-
-// Un usuario tiene muchas recomendaciones
-User.hasMany(Recommendation, { foreignKey: 'userId', as: 'recommendations' });
-Recommendation.belongsTo(User, { foreignKey: 'userId', as: 'user' });
-
-// Una recomendación puede estar asociada a una materia
-Subject.hasMany(Recommendation, { foreignKey: 'subjectId', as: 'recommendations' });
-Recommendation.belongsTo(Subject, { foreignKey: 'subjectId', as: 'subject' });
-
-// Un usuario da feedback sobre recomendaciones
-User.hasMany(Feedback, { foreignKey: 'userId', as: 'feedbacks' });
-Feedback.belongsTo(User, { foreignKey: 'userId', as: 'user' });
-
+// Una recomendación puede recibir un feedback
 Recommendation.hasOne(Feedback, { foreignKey: 'recommendationId', as: 'feedback' });
 Feedback.belongsTo(Recommendation, { foreignKey: 'recommendationId', as: 'recommendation' });
 
 module.exports = {
   sequelize,
   User,
-  StudentProfile,
-  Subject,
-  StudentSubject,
+  MoodleSession,
   ChatMessage,
   Recommendation,
   Feedback,

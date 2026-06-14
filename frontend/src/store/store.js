@@ -1,18 +1,19 @@
 /**
- * Store central de Redux con los 4 slices de SIRA.
+ * Store central de Redux.
+ * Slices: auth, chat, moodle (cursos/calificaciones), recommendations.
  */
 
 import { configureStore } from '@reduxjs/toolkit';
 import authReducer           from './slices/authSlice';
 import chatReducer           from './slices/chatSlice';
-import profileReducer        from './slices/profileSlice';
+import moodleReducer         from './slices/moodleSlice';
 import recommendationReducer from './slices/recommendationSlice';
 
 const store = configureStore({
   reducer: {
     auth:            authReducer,
     chat:            chatReducer,
-    profile:         profileReducer,
+    moodle:          moodleReducer,
     recommendations: recommendationReducer,
   },
 });
