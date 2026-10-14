@@ -11,45 +11,12 @@ const { isGroqAvailable } = require('../services/groq.service');
 const moodleService = require('../services/moodle.service');
 
 /**
- * Normaliza la respuesta de gradereport_user_get_grades_table al formato interno:
- * [{ courseId, courseName, items: [{ name, percentage }] }]
- */
-const normalizeGrades = (gradesResponse, courseId, courseName) => {
-  try {
-    const table = gradesResponse?.tables?.[0];
-    if (!table) return [];
-
-    const items = (table.tabledata || [])
-      .filter(row => row.itemname && row.grade)
-      .map(row => {
-        const rawGrade = row.grade?.content || '';
-        // Formato típico Moodle: "75,00 / 100,00" o "75.00 / 100.00"
-        const parts = rawGrade.replace(',', '.').split('/').map(s => parseFloat(s.trim()));
-        const gradeVal = parts[0] || null;
-        const maxVal   = parts[1] || 100;
-        const percentage = (gradeVal !== null && maxVal > 0)
-          ? Math.round((gradeVal / maxVal) * 100)
-          : null;
-        return {
-          name: row.itemname?.content?.replace(/<[^>]+>/g, '').trim() || 'Actividad',
-          percentage,
-        };
-      })
-      .filter(i => i.percentage !== null);
-
-    return [{ courseId, courseName, items }];
-  } catch {
-    return [];
-  }
-};
-
-/**
  * POST /api/chat/message
  * Recibe un mensaje y retorna la respuesta de SIRA con contexto Moodle enriquecido.
  */
 const sendMessage = async (req, res) => {
   try {
-    const { message, sessionId } = req.body;
+    const { message, sessionId, courseId } = req.body;
     const { moodleUserId, fullName, role } = req.user;
     const moodleToken = req.headers['x-moodle-token'];
 
@@ -66,16 +33,42 @@ const sendMessage = async (req, res) => {
     let courses = [];
     let grades  = [];
 
+    let enrolledStudents = [];
+
     if (moodleToken) {
       try {
         courses = await moodleService.getUserCourses(moodleUserId, moodleToken);
         courses = Array.isArray(courses) ? courses : [];
 
-        // Obtener calificaciones del primer curso con bajo progreso (si existe)
-        const lowCourse = courses.find(c => c.progress !== null && c.progress < 40);
-        if (lowCourse) {
-          const gradesRaw = await moodleService.getUserGrades(lowCourse.id, moodleUserId, moodleToken);
-          grades = normalizeGrades(gradesRaw, lowCourse.id, lowCourse.fullname);
+        // Prioridad: curso desde el que se abrió el plugin; fallback: primer curso con bajo progreso
+        const targetCourseId = courseId ? parseInt(courseId) : null;
+        const targetCourse   = targetCourseId
+          ? courses.find(c => c.id === targetCourseId)
+          : courses.find(c => c.progress !== null && c.progress < 40);
+
+        if (targetCourse) {
+          const gradesRaw = await moodleService.getUserGrades(targetCourse.id, moodleUserId, moodleToken);
+          grades = moodleService.normalizeGrades(gradesRaw, targetCourse.id, targetCourse.fullname);
+
+          // Para docentes: obtener lista de estudiantes inscritos en el curso activo
+          if (role === 'teacher') {
+            try {
+              const rawEnrolled = await moodleService.getEnrolledUsers(targetCourse.id, moodleToken);
+              enrolledStudents = (Array.isArray(rawEnrolled) ? rawEnrolled : [])
+                .filter(u => u.roles?.some(r => r.shortname === 'student'))
+                .map(u => ({
+                  id: u.id,
+                  name: u.fullname,
+                  email: u.email || null,
+                  lastAccess: u.lastaccess
+                    ? new Date(u.lastaccess * 1000).toLocaleDateString('es-CO')
+                    : null,
+                }))
+                .slice(0, 40);
+            } catch (e) {
+              console.warn('No se pudo obtener estudiantes inscritos:', e.message);
+            }
+          }
         }
       } catch (moodleError) {
         // No bloquear el chat si Moodle no responde
@@ -87,6 +80,8 @@ const sendMessage = async (req, res) => {
       profile: { name: fullName, moodleUserId, role },
       courses,
       grades,
+      activeCourseId: courseId ? parseInt(courseId) : null,
+      enrolledStudents,
       chatHistory: chatHistory.map(m => ({ role: m.role, content: m.content })),
     };
 

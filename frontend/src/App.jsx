@@ -20,23 +20,9 @@ import Profile          from './pages/Profile';
 function RootRedirect() {
   const user = useSelector((s) => s.auth.user);
   if (!user) return <Navigate to="/login" replace />;
-  if (user.role === 'teacher') return <Navigate to="/teacher"   replace />;
-  if (user.role === 'admin')   return <Navigate to="/admin"     replace />;
+  if (user.role === 'teacher') return <Navigate to="/teacher" replace />;
+  if (user.role === 'admin')   return <Navigate to="/admin"   replace />;
   return <Navigate to="/dashboard" replace />;
-}
-
-function TeacherOnly() {
-  const user = useSelector((s) => s.auth.user);
-  if (!user) return <Navigate to="/login" replace />;
-  if (user.role !== 'teacher') return <Navigate to="/dashboard" replace />;
-  return <TeacherDashboard />;
-}
-
-function AdminOnly() {
-  const user = useSelector((s) => s.auth.user);
-  if (!user) return <Navigate to="/login" replace />;
-  if (user.role !== 'admin') return <Navigate to="/dashboard" replace />;
-  return <AdminDashboard />;
 }
 
 export default function App() {
@@ -46,15 +32,27 @@ export default function App() {
         {/* Ruta pública */}
         <Route path="/login" element={<Login />} />
 
-        {/* Rutas protegidas */}
+        {/* Rutas de estudiante — cualquier usuario autenticado */}
         <Route element={<ProtectedRoute />}>
           <Route element={<AppLayout />}>
             <Route path="/dashboard" element={<Dashboard />} />
-            <Route path="/teacher"   element={<TeacherOnly />} />
-            <Route path="/admin"     element={<AdminOnly />} />
             <Route path="/chat"      element={<Chat />} />
             <Route path="/profile"   element={<Profile />} />
             <Route path="/reports"   element={<Reports />} />
+          </Route>
+        </Route>
+
+        {/* Rutas exclusivas de docente */}
+        <Route element={<ProtectedRoute allowedRoles={['teacher']} />}>
+          <Route element={<AppLayout />}>
+            <Route path="/teacher" element={<TeacherDashboard />} />
+          </Route>
+        </Route>
+
+        {/* Rutas exclusivas de administrador */}
+        <Route element={<ProtectedRoute allowedRoles={['admin']} />}>
+          <Route element={<AppLayout />}>
+            <Route path="/admin" element={<AdminDashboard />} />
           </Route>
         </Route>
 

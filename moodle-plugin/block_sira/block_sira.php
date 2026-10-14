@@ -10,7 +10,7 @@ class block_sira extends block_base {
     }
 
     public function get_content() {
-        global $USER;
+        global $USER, $PAGE;
 
         if ($this->content !== null) {
             return $this->content;
@@ -21,8 +21,16 @@ class block_sira extends block_base {
             return null;
         }
 
-        $role        = $this->detectUserRole();
-        $redirectUrl = new moodle_url('/blocks/sira/redirect.php', ['role' => $role]);
+        $role   = $this->detectUserRole();
+        $params = ['role' => $role];
+
+        // Pasar el ID del curso actual para que SIRA enfoque el contexto en esa materia.
+        // $PAGE->course->id es 1 cuando el bloque está en la página principal del sitio.
+        if ($PAGE->course->id > 1) {
+            $params['courseId'] = $PAGE->course->id;
+        }
+
+        $redirectUrl = new moodle_url('/blocks/sira/redirect.php', $params);
 
         $this->content         = new stdClass();
         $this->content->text   = $this->renderContent($redirectUrl, $role, $USER->firstname);

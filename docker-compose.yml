@@ -1,0 +1,114 @@
+services:
+
+  # ── Base de datos de Moodle (MariaDB) ────────────────────────────────────
+  mariadb:
+    image: mariadb:10.6
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpass2026
+      MYSQL_DATABASE: moodle_db
+      MYSQL_USER: moodle
+      MYSQL_PASSWORD: moodle2026
+    volumes:
+      - mariadb_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-prootpass2026"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # ── Moodle 4.x ───────────────────────────────────────────────────────────
+  # Primera arrancada tarda 5-10 min mientras instala.
+  # El plugin block_sira se monta directamente en el directorio de bloques.
+  moodle:
+    image: bitnami/moodle:4
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      MOODLE_DATABASE_TYPE: mariadb
+      MOODLE_DATABASE_HOST: mariadb
+      MOODLE_DATABASE_PORT_NUMBER: 3306
+      MOODLE_DATABASE_NAME: moodle_db
+      MOODLE_DATABASE_USER: moodle
+      MOODLE_DATABASE_PASSWORD: moodle2026
+      MOODLE_USERNAME: admin
+      MOODLE_PASSWORD: Admin1234!
+      MOODLE_EMAIL: admin@ufps.edu.co
+      MOODLE_SITE_NAME: "UFPS - Plataforma Virtual"
+      MOODLE_HOST: localhost
+      MOODLE_HTTP_PORT_NUMBER: 8080
+      MOODLE_SKIP_BOOTSTRAP: "no"
+    volumes:
+      - moodle_data:/bitnami/moodle
+      - moodle_moodledata:/bitnami/moodledata
+      # Plugin block_sira montado directamente — disponible al terminar la instalación
+      - ./moodle-plugin/block_sira:/bitnami/moodle/blocks/sira
+    depends_on:
+      mariadb:
+        condition: service_healthy
+
+  # ── Base de datos de SIRA (PostgreSQL) ───────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: sira_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: 2903
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d sira_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Backend SIRA (Node.js / Express) ─────────────────────────────────────
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    environment:
+      NODE_ENV: development
+      PORT: 5000
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: sira_db
+      DB_USER: postgres
+      DB_PASSWORD: 2903
+      JWT_SECRET: sira_jwt_dev_secret_2026_ufps
+      FRONTEND_URL: http://localhost:5173
+      # Backend llama a Moodle por la red interna de Docker
+      MOODLE_URL: http://moodle:8080
+      # GROQ_API_KEY se lee del .env raíz si existe (opcional — sin él usa solo reglas)
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      GROQ_MODEL: llama-3.1-8b-instant
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # ── Frontend SIRA (React + Vite) ─────────────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "5173:5173"
+    environment:
+      # Vite proxy usa el nombre del servicio Docker para llegar al backend
+      VITE_API_TARGET: http://backend:5000
+    depends_on:
+      - backend
+
+volumes:
+  mariadb_data:
+  moodle_data:
+  moodle_moodledata:
+  postgres_data:

@@ -31,7 +31,10 @@ node_modules/
 
 #docs
 SIRA_Anteproyecto.pdf
-reglas.txt
+reglas.md
+COMO_EJECUTAR.md
+DOCKER_SETUP.md
+
 
 #images
 imagenes/referencia.png

@@ -9,6 +9,11 @@ const bcrypt = require('bcryptjs');
 const { sequelize, User } = require('../models');
 
 async function seed() {
+  if (process.env.NODE_ENV === 'production') {
+    console.error('SEED BLOQUEADO: no ejecutar en producción (usa force:true y elimina todas las tablas).');
+    process.exit(1);
+  }
+
   try {
     console.log('Sincronizando modelos con la base de datos...');
 

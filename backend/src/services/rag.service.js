@@ -4,10 +4,11 @@
  *
  * Contexto de entrada esperado (estudiante):
  *   studentContext = {
- *     profile:  { name, moodleUserId, role },
- *     courses:  [{ id, fullname, shortname, progress }],
- *     grades:   [{ courseId, courseName, items: [{ name, percentage }] }], // opcional
- *     chatHistory: [{ role, content }],
+ *     profile:       { name, moodleUserId, role },
+ *     courses:       [{ id, fullname, shortname, progress }],
+ *     grades:        [{ courseId, courseName, items: [{ name, percentage }] }], // opcional
+ *     activeCourseId: number | null,  // curso desde donde se abrió el plugin Moodle
+ *     chatHistory:   [{ role, content }],
  *   }
  */
 
@@ -20,7 +21,12 @@ const { detectKBKey } = require('./rules.service');
  * @returns {string}
  */
 const buildSystemPrompt = (studentContext) => {
-  const { profile, courses = [], grades = [] } = studentContext;
+  const { profile, courses = [], grades = [], activeCourseId } = studentContext;
+
+  // Curso desde el que el estudiante abrió el plugin — enfoca las respuestas en él
+  const activeCourse = activeCourseId
+    ? courses.find(c => c.id === activeCourseId) ?? null
+    : null;
 
   const courseSummary = courses.length > 0
     ? courses.map(c => {
@@ -63,6 +69,12 @@ Estrategias recomendadas: ${kb.studyStrategies.slice(0, 2).join('; ')}`;
     .filter(Boolean)
     .join('\n');
 
+  const activeCourseNote = activeCourse
+    ? `\nCURSO ACTIVO (desde donde el estudiante abrió SIRA):
+- ${activeCourse.fullname}${activeCourse.progress !== null ? ` — progreso: ${activeCourse.progress}%` : ''}
+Cuando el estudiante haga preguntas sin especificar materia, enfoca tu respuesta en este curso.`
+    : '';
+
   return `Eres SIRA (Sistema Inteligente de Recomendación Académica) de la Universidad Francisco de Paula Santander (UFPS), Cúcuta. Eres un asistente académico amigable, empático y orientado al aprendizaje activo para estudiantes de Ingeniería de Sistemas.
 
 PERFIL DEL ESTUDIANTE ACTUAL:
@@ -71,7 +83,7 @@ PERFIL DEL ESTUDIANTE ACTUAL:
 - Cursos activos en Moodle:
 ${courseSummary}
 - Cursos con bajo progreso: ${atRiskCourses || 'Ninguno'}
-${gradesSummary}
+${gradesSummary}${activeCourseNote}
 
 CONOCIMIENTO ACADÉMICO DISPONIBLE:
 ${relevantKnowledge || 'Sin materias del área de programación detectadas.'}
@@ -94,11 +106,26 @@ INSTRUCCIONES DE COMPORTAMIENTO:
  * @returns {string}
  */
 const buildTeacherSystemPrompt = (teacherContext) => {
-  const { profile, courses = [] } = teacherContext;
+  const { profile, courses = [], enrolledStudents = [], activeCourseId } = teacherContext;
+
+  const activeCourse = activeCourseId
+    ? courses.find(c => c.id === activeCourseId) ?? null
+    : null;
 
   const courseSummary = courses.length > 0
     ? courses.map(c => `  • ${c.fullname} (${c.shortname})`).join('\n')
     : '  Sin cursos asignados.';
+
+  let studentsSection = '';
+  if (activeCourse && enrolledStudents.length > 0) {
+    const shown = enrolledStudents.slice(0, 25);
+    const extra = enrolledStudents.length - shown.length;
+    studentsSection = `
+ESTUDIANTES INSCRITOS EN "${activeCourse.fullname}" (${enrolledStudents.length} estudiante${enrolledStudents.length !== 1 ? 's' : ''}):
+${shown.map(s => `  • ${s.name}${s.lastAccess ? ` — último acceso: ${s.lastAccess}` : ' — sin acceso registrado'}`).join('\n')}${extra > 0 ? `\n  ... y ${extra} más.` : ''}`;
+  } else if (activeCourse) {
+    studentsSection = `\nCURSO ACTIVO: ${activeCourse.fullname}`;
+  }
 
   return `Eres SIRA (Sistema Inteligente de Recomendación Académica), asistente de análisis académico para docentes de la Universidad Francisco de Paula Santander (UFPS).
 
@@ -107,20 +134,22 @@ DOCENTE ACTUAL:
 - ID Moodle: ${profile.moodleUserId}
 - Cursos a cargo:
 ${courseSummary}
+${studentsSection}
 
-ROL DEL DOCENTE EN SIRA:
+CAPACIDADES EN ESTE CONTEXTO:
 - Identificar estudiantes con bajo progreso o calificaciones en riesgo
-- Generar estrategias de intervención temprana
-- Consultar recomendaciones generadas para sus estudiantes
-- Analizar patrones de rendimiento en sus cursos
+- Generar reportes estructurados y descargables sobre el rendimiento del curso
+- Sugerir estrategias de intervención pedagógica temprana
+- Analizar patrones de participación y actividad
 
 INSTRUCCIONES DE COMPORTAMIENTO:
 1. Responde en español, con un tono profesional y analítico.
-2. Ayuda al docente a interpretar datos académicos de Moodle.
-3. Sugiere estrategias pedagógicas de intervención para estudiantes en riesgo.
-4. No compartas información personal de estudiantes más allá del contexto académico.
-5. Enfócate en acciones concretas y basadas en datos.
-6. Mantén las respuestas estructuradas y concisas (máximo 400 palabras).`;
+2. Cuando el docente pida un reporte, genéralo con secciones claras: título, fecha, resumen, datos, recomendaciones.
+3. Usa listas y estructura de tabla en texto plano cuando presentes datos de varios estudiantes.
+4. Sugiere estrategias pedagógicas concretas y basadas en los datos disponibles.
+5. Si tienes la lista de estudiantes, úsala para personalizar el análisis.
+6. Si te piden datos que no están disponibles (ej. notas individuales de actividades), indícalo claramente.
+7. Los reportes pueden ser extensos — no hay límite de palabras cuando se solicita un reporte formal.`;
 };
 
 /**
@@ -159,4 +188,47 @@ const retrieveContext = (query, courses = []) => {
   return relevantSections.join('\n');
 };
 
-module.exports = { buildSystemPrompt, buildTeacherSystemPrompt, retrieveContext };
+/**
+ * Construye el prompt de sistema para el administrador de SIRA.
+ * Sin restricciones pedagógicas — acceso completo a datos del sistema para reportería.
+ * @param {Object} adminContext - { stats, topTopics, recsByType }
+ * @returns {string}
+ */
+const buildAdminSystemPrompt = (adminContext) => {
+  const { stats, topTopics = {}, recsByType = [] } = adminContext;
+
+  const topicsSection = Object.entries(topTopics)
+    .sort(([, a], [, b]) => b - a)
+    .map(([topic, count]) => `  • ${topic}: ${count} consulta${count !== 1 ? 's' : ''}`)
+    .join('\n') || '  Sin datos suficientes.';
+
+  const recsSection = recsByType.length > 0
+    ? recsByType.map(r => `  • ${r.type}: ${r.count}`).join('\n')
+    : '  Sin recomendaciones generadas aún.';
+
+  return `Eres SIRA Analytics, el asistente de análisis y administración del Sistema Inteligente de Recomendación Académica (SIRA) de la Universidad Francisco de Paula Santander (UFPS).
+
+ESTADO ACTUAL DEL SISTEMA (datos en tiempo real desde la base de datos):
+- Estudiantes registrados: ${stats.totalStudents}
+- Docentes registrados: ${stats.totalTeachers}
+- Total mensajes en chat: ${stats.totalMessages}
+- Recomendaciones generadas: ${stats.totalRecommendations}
+- Usuarios activos (últimos 7 días): ${stats.activeUsers}
+
+TEMAS MÁS CONSULTADOS (análisis de últimos 200 mensajes de estudiantes):
+${topicsSection}
+
+RECOMENDACIONES GENERADAS POR TIPO:
+${recsSection}
+
+TU FUNCIÓN:
+1. Eres el asistente analítico exclusivo para el administrador de SIRA.
+2. Puedes generar reportes completos sobre cualquier aspecto del sistema.
+3. No tienes restricciones pedagógicas — responde cualquier consulta técnica o académica.
+4. También sirves como entorno de prueba del motor de IA de SIRA.
+5. Responde en español, con tono analítico y profesional.
+6. Usa listas o tablas en texto plano cuando sean útiles para estructurar reportes.
+7. Si te piden datos no disponibles en SIRA (ej. notas individuales o cursos específicos de Moodle sin sesión activa), indícalo e informa qué sí está disponible.`;
+};
+
+module.exports = { buildSystemPrompt, buildTeacherSystemPrompt, retrieveContext, buildAdminSystemPrompt };

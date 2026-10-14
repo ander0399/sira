@@ -13,6 +13,9 @@ if (!in_array($role, ['student', 'teacher'])) {
     $role = 'student';
 }
 
+// Curso desde el que se abrió el plugin (0 = fuera de un curso específico)
+$courseId = optional_param('courseId', 0, PARAM_INT);
+
 // Obtener el nombre corto del servicio desde la configuración del plugin
 $serviceName = get_config('block_sira', 'servicename') ?: 'sira_service';
 
@@ -40,10 +43,10 @@ if (empty($tokenRecord->token)) {
 // Construir la URL de destino en el frontend de SIRA
 $siraUrl = rtrim(get_config('block_sira', 'siraurl') ?: 'http://localhost:5173', '/');
 
-$params = http_build_query([
-    'moodleToken' => $tokenRecord->token,
-    'role'        => $role,
-]);
+$params = ['moodleToken' => $tokenRecord->token, 'role' => $role];
+if ($courseId > 0) {
+    $params['courseId'] = $courseId;
+}
 
-// Redirigir al login de SIRA con el token y el rol
-redirect($siraUrl . '/login?' . $params);
+// Redirigir al login de SIRA con el token, el rol y (si aplica) el curso activo
+redirect($siraUrl . '/login?' . http_build_query($params));

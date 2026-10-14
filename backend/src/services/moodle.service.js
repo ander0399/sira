@@ -100,6 +100,40 @@ const getEnrolledUsers = async (courseId, token) => {
   return callMoodle('core_enrol_get_enrolled_users', { courseid: courseId }, token);
 };
 
+/**
+ * Normaliza la respuesta de gradereport_user_get_grades_table al formato interno:
+ * [{ courseId, courseName, items: [{ name, percentage }] }]
+ * Extraído del chat.controller para centralizar la lógica de transformación Moodle.
+ */
+const normalizeGrades = (gradesResponse, courseId, courseName) => {
+  try {
+    const table = gradesResponse?.tables?.[0];
+    if (!table) return [];
+
+    const items = (table.tabledata || [])
+      .filter(row => row.itemname && row.grade)
+      .map(row => {
+        const rawGrade = row.grade?.content || '';
+        // Formato típico Moodle: "75,00 / 100,00" o "75.00 / 100.00"
+        const parts = rawGrade.replace(',', '.').split('/').map(s => parseFloat(s.trim()));
+        const gradeVal   = parts[0] || null;
+        const maxVal     = parts[1] || 100;
+        const percentage = (gradeVal !== null && maxVal > 0)
+          ? Math.round((gradeVal / maxVal) * 100)
+          : null;
+        return {
+          name: row.itemname?.content?.replace(/<[^>]+>/g, '').trim() || 'Actividad',
+          percentage,
+        };
+      })
+      .filter(i => i.percentage !== null);
+
+    return [{ courseId, courseName, items }];
+  } catch {
+    return [];
+  }
+};
+
 module.exports = {
   getSiteInfo,
   getUserCourses,
@@ -107,4 +141,5 @@ module.exports = {
   getCourseContents,
   getAssignmentSubmissions,
   getEnrolledUsers,
+  normalizeGrades,
 };

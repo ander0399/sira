@@ -2,6 +2,8 @@
  * Página del chat de ChatSIRA.
  * Interfaz conversacional completa con historial, indicador de escritura
  * y botón de nueva sesión.
+ * Si el usuario llegó desde el plugin Moodle con un courseId, el header
+ * muestra el nombre del curso activo y el backend enfoca el contexto en él.
  */
 import { useEffect, useRef } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
@@ -18,11 +20,32 @@ const WELCOME_MESSAGE = {
   createdAt: new Date().toISOString(),
 };
 
+const downloadAsText = (content, prefix = 'reporte-sira') => {
+  const date = new Date().toISOString().split('T')[0];
+  const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href = url;
+  a.download = `${prefix}-${date}.txt`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+};
+
 export default function Chat() {
   const dispatch  = useDispatch();
   const bottomRef = useRef(null);
 
-  const { messages, sessionId, isTyping, aiAvailable, error } = useSelector((s) => s.chat);
+  const { messages, sessionId, isTyping, aiAvailable, activeCourseId, error } = useSelector((s) => s.chat);
+  const courses = useSelector((s) => s.moodle.courses);
+  const { user } = useSelector((s) => s.auth);
+  const isTeacher = user?.role === 'teacher';
+
+  // Nombre del curso activo (el que el usuario tenía abierto en Moodle al abrir el plugin)
+  const activeCourse = activeCourseId
+    ? courses.find(c => c.id === activeCourseId) ?? null
+    : null;
 
   /* Scroll automático al último mensaje */
   useEffect(() => {
@@ -30,7 +53,7 @@ export default function Chat() {
   }, [messages, isTyping]);
 
   const handleSend = (text) => {
-    dispatch(sendMessage({ message: text, sessionId }));
+    dispatch(sendMessage({ message: text, sessionId, courseId: activeCourseId }));
   };
 
   const handleNewSession = () => dispatch(startNewSession());
@@ -47,6 +70,9 @@ export default function Chat() {
             <p className="font-bold text-secondary text-sm">ChatSIRA</p>
             <p className="text-xs text-gray-400">
               {aiAvailable ? '🟢 IA activa (Groq)' : '🟡 Modo básico (motor de reglas)'}
+              {activeCourse && (
+                <span className="ml-2 text-primary/80 font-medium">· {activeCourse.fullname}</span>
+              )}
             </p>
           </div>
         </div>
@@ -58,7 +84,11 @@ export default function Chat() {
       {/* Área de mensajes */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-gray-50/50">
         {allMessages.map((msg, idx) => (
-          <MessageBubble key={idx} message={msg} />
+          <MessageBubble
+            key={idx}
+            message={msg}
+            onDownload={isTeacher ? (content) => downloadAsText(content, 'reporte-docente-sira') : undefined}
+          />
         ))}
         {isTyping && <TypingIndicator />}
         {error && (

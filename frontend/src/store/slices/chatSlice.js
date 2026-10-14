@@ -1,6 +1,7 @@
 /**
  * Slice del chatbot ChatSIRA.
- * Maneja el historial de mensajes, sessionId y estado de escritura del bot.
+ * Maneja el historial de mensajes, sessionId, estado de escritura
+ * y el curso activo desde el que el usuario abrió el plugin Moodle.
  */
 
 import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
@@ -8,9 +9,9 @@ import { v4 as uuidv4 } from 'uuid';
 import api from '../../services/api';
 
 /* Thunk: enviar mensaje y recibir respuesta de SIRA */
-export const sendMessage = createAsyncThunk('chat/send', async ({ message, sessionId }, { rejectWithValue }) => {
+export const sendMessage = createAsyncThunk('chat/send', async ({ message, sessionId, courseId }, { rejectWithValue }) => {
   try {
-    const { data } = await api.post('/chat/message', { message, sessionId });
+    const { data } = await api.post('/chat/message', { message, sessionId, courseId });
     return data;
   } catch (err) {
     return rejectWithValue(err.response?.data?.message || 'Error al enviar el mensaje.');
@@ -27,14 +28,17 @@ export const loadChatHistory = createAsyncThunk('chat/history', async (sessionId
   }
 });
 
+const savedCourseId = parseInt(localStorage.getItem('sira_course_id') || '0') || null;
+
 const chatSlice = createSlice({
   name: 'chat',
   initialState: {
-    messages:    [],       // [{ role, content, source, createdAt }]
-    sessionId:   null,     // UUID de la sesión activa
-    isTyping:    false,    // SIRA está "escribiendo"
-    aiAvailable: false,    // si Groq está activo en el backend
-    error:       null,
+    messages:      [],       // [{ role, content, source, createdAt }]
+    sessionId:     null,     // UUID de la sesión activa
+    isTyping:      false,    // SIRA está "escribiendo"
+    aiAvailable:   false,    // si Groq está activo en el backend
+    activeCourseId: savedCourseId, // ID del curso desde donde se abrió el plugin
+    error:         null,
   },
   reducers: {
     startNewSession(state) {
@@ -45,6 +49,11 @@ const chatSlice = createSlice({
     clearChat(state) {
       state.messages = [];
       state.error    = null;
+    },
+    setActiveCourse(state, { payload }) {
+      state.activeCourseId = payload;
+      if (payload) localStorage.setItem('sira_course_id', String(payload));
+      else         localStorage.removeItem('sira_course_id');
     },
   },
   extraReducers: (builder) => {
@@ -83,5 +92,5 @@ const chatSlice = createSlice({
   },
 });
 
-export const { startNewSession, clearChat } = chatSlice.actions;
+export const { startNewSession, clearChat, setActiveCourse } = chatSlice.actions;
 export default chatSlice.reducer;

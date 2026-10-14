@@ -9,6 +9,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { moodleLogin, adminLogin, clearError } from '../store/slices/authSlice';
+import { setActiveCourse } from '../store/slices/chatSlice';
 import Button from '../components/shared/Button';
 import Input  from '../components/shared/Input';
 
@@ -35,11 +36,15 @@ export default function Login() {
 
   useEffect(() => {
     if (token && user) {
+      // Si el plugin Moodle envió un courseId, guardarlo en el estado del chat
+      const courseId = parseInt(searchParams.get('courseId') || '0') || null;
+      if (courseId) dispatch(setActiveCourse(courseId));
+
       const dest = user.role === 'teacher' ? '/teacher' : user.role === 'admin' ? '/admin' : '/dashboard';
       navigate(dest, { replace: true });
     }
     return () => dispatch(clearError());
-  }, [token, user, navigate, dispatch]);
+  }, [token, user, navigate, dispatch, searchParams]);
 
   const handleAdminSubmit = (e) => {
     e.preventDefault();
