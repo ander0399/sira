@@ -1,6 +1,6 @@
 /**
  * Servicio orquestador de recomendaciones y chat SIRA.
- * Combina el motor de reglas con Groq para generar respuestas híbridas.
+ * Combina el motor de reglas con Gemini para generar respuestas híbridas.
  *
  * Contexto de entrada esperado:
  *   studentContext = {
@@ -11,9 +11,9 @@
  *   }
  */
 
-const { generateRecommendations, isExerciseRequest, getExerciseRedirectResponse } = require('./rules.service');
+const { generateRecommendations, isExerciseRequest, isOffTopic, getExerciseRedirectResponse, getOffTopicResponse } = require('./rules.service');
 const { buildSystemPrompt, buildTeacherSystemPrompt, retrieveContext } = require('./rag.service');
-const { sendToGroq, isGroqAvailable } = require('./groq.service');
+const { sendToGemini, isGeminiAvailable } = require('./gemini.service');
 const { Recommendation } = require('../models');
 
 /**
@@ -24,7 +24,7 @@ const { Recommendation } = require('../models');
  * @param {Object} studentContext - { profile, courses, grades, chatHistory }
  * @returns {{ response: string, source: string }}
  */
-const processChat = async (userMessage, studentContext) => {
+const processChat = async (userMessage, studentContext, imageData = null) => {
   const { profile } = studentContext;
 
   // Restricción pedagógica: no resolver ejercicios directamente (solo para estudiantes)
@@ -32,12 +32,17 @@ const processChat = async (userMessage, studentContext) => {
     return { response: getExerciseRedirectResponse(), source: 'rules' };
   }
 
+  // Restricción de scope: solo materias permitidas (solo para estudiantes)
+  if (profile.role === 'student' && isOffTopic(userMessage)) {
+    return { response: getOffTopicResponse(), source: 'rules' };
+  }
+
   // Seleccionar prompt según el rol del usuario
   const systemPrompt = profile.role === 'teacher'
     ? buildTeacherSystemPrompt(studentContext)
     : buildSystemPrompt(studentContext);
 
-  if (isGroqAvailable()) {
+  if (isGeminiAvailable()) {
     const ragContext = profile.role === 'student'
       ? retrieveContext(userMessage, studentContext.courses || [])
       : '';
@@ -46,13 +51,14 @@ const processChat = async (userMessage, studentContext) => {
       ? `${systemPrompt}\n\nCONTEXTO ADICIONAL RELEVANTE:\n${ragContext}`
       : systemPrompt;
 
-    const aiResponse = await sendToGroq(
+    const aiResponse = await sendToGemini(
       enrichedPrompt,
       studentContext.chatHistory || [],
-      userMessage
+      userMessage,
+      { imageData }
     );
 
-    if (aiResponse) return { response: aiResponse, source: 'groq' };
+    if (aiResponse) return { response: aiResponse, source: 'gemini' };
   }
 
   // Fallback: motor de reglas
@@ -60,7 +66,7 @@ const processChat = async (userMessage, studentContext) => {
 };
 
 /**
- * Genera respuesta de chat por reglas cuando Groq no está disponible.
+ * Genera respuesta de chat por reglas cuando Gemini no está disponible.
  * @param {string} message
  * @param {Object} context - { profile, courses, grades }
  * @returns {{ response: string, source: string }}
@@ -105,9 +111,9 @@ const generateRulesBasedChatResponse = (message, context) => {
     };
   }
 
-  // Respuesta genérica sin Groq
+  // Respuesta genérica sin Gemini
   return {
-    response: `Entiendo tu consulta sobre **"${message}"**.\n\nActualmente estoy operando en modo básico. Puedo orientarte sobre:\n• Estrategias de estudio para tus cursos actuales\n• Recursos y materiales de apoyo por materia\n• Tu progreso y calificaciones en Moodle\n\n¿Sobre cuál de estos temas quieres orientación? 📚`,
+    response: `Entiendo tu consulta sobre **"${message}"**.\n\nActualmente estoy operando en modo básico (Gemini no disponible). Puedo orientarte sobre:\n• Estrategias de estudio para tus cursos actuales\n• Recursos y materiales de apoyo por materia\n• Tu progreso y calificaciones en Moodle\n\n¿Sobre cuál de estos temas quieres orientación? 📚`,
     source: 'rules',
   };
 };

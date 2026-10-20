@@ -31,9 +31,9 @@ const ChatMessage = sequelize.define('ChatMessage', {
     type: DataTypes.STRING(36),
     allowNull: false,
   },
-  // Fuente de la respuesta: motor de reglas, Groq, o combinación
+  // Fuente de la respuesta: motor de reglas, Gemini, o combinación
   source: {
-    type: DataTypes.ENUM('rules', 'groq', 'hybrid'),
+    type: DataTypes.ENUM('rules', 'gemini', 'hybrid'),
     allowNull: true,
   },
 }, {

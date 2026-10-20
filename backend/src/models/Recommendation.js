@@ -39,7 +39,7 @@ const Recommendation = sequelize.define('Recommendation', {
     allowNull: true,
   },
   source: {
-    type: DataTypes.ENUM('rules', 'groq', 'hybrid'),
+    type: DataTypes.ENUM('rules', 'gemini', 'hybrid'),
     defaultValue: 'rules',
   },
   // Datos adicionales en JSON (links, pasos, ejemplos)

@@ -7,7 +7,7 @@
 const { v4: uuidv4 } = require('uuid');
 const { ChatMessage } = require('../models');
 const { processChat } = require('../services/recommendation.service');
-const { isGroqAvailable } = require('../services/groq.service');
+const { isGeminiAvailable } = require('../services/gemini.service');
 const moodleService = require('../services/moodle.service');
 
 /**
@@ -93,7 +93,12 @@ const sendMessage = async (req, res) => {
       sessionId: activeSessionId,
     });
 
-    const { response, source } = await processChat(message, studentContext);
+    // Extraer imagen adjunta si viene en la petición (vía multer)
+    const imageData = req.file
+      ? { mimeType: req.file.mimetype, base64: req.file.buffer.toString('base64') }
+      : null;
+
+    const { response, source } = await processChat(message, studentContext, imageData);
 
     // Guardar respuesta de SIRA
     await ChatMessage.create({
@@ -108,7 +113,7 @@ const sendMessage = async (req, res) => {
       message: response,
       sessionId: activeSessionId,
       source,
-      aiAvailable: isGroqAvailable(),
+      aiAvailable: isGeminiAvailable(),
     });
   } catch (error) {
     console.error('Error en sendMessage:', error.message);

@@ -83,12 +83,13 @@ services:
       DB_USER: postgres
       DB_PASSWORD: 2903
       JWT_SECRET: sira_jwt_dev_secret_2026_ufps
+      JWT_EXPIRES_IN: 7d
       FRONTEND_URL: http://localhost:5173
       # Backend llama a Moodle por la red interna de Docker
       MOODLE_URL: http://moodle:8080
-      # GROQ_API_KEY se lee del .env raíz si existe (opcional — sin él usa solo reglas)
-      GROQ_API_KEY: ${GROQ_API_KEY:-}
-      GROQ_MODEL: llama-3.1-8b-instant
+      # Gemini API (opcional — sin GEMINI_API_KEY el sistema usa solo motor de reglas)
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-flash-lite-latest}
     depends_on:
       postgres:
         condition: service_healthy

@@ -2,7 +2,7 @@ const { MoodleSession, ChatMessage, Recommendation, User } = require('../models'
 const { Op } = require('sequelize');
 const sequelize         = require('../config/database');
 const bcrypt            = require('bcryptjs');
-const { isGroqAvailable, sendToGroq } = require('../services/groq.service');
+const { isGeminiAvailable, sendToGemini } = require('../services/gemini.service');
 const { buildAdminSystemPrompt } = require('../services/rag.service');
 
 const getStats = async (req, res) => {
@@ -87,7 +87,7 @@ const getSystemHealth = async (req, res) => {
   let dbStatus = 'ok';
   try { await sequelize.authenticate(); } catch { dbStatus = 'error'; }
 
-  const groqStatus = isGroqAvailable() ? 'ok' : 'unavailable';
+  const geminiStatus = isGeminiAvailable() ? 'ok' : 'unavailable';
 
   const moodleUrl = process.env.MOODLE_URL;
   let moodleStatus = 'unconfigured';
@@ -107,7 +107,7 @@ const getSystemHealth = async (req, res) => {
     timestamp: new Date().toISOString(),
     services: {
       database: { status: dbStatus },
-      groq:     { status: groqStatus },
+      gemini:   { status: geminiStatus },
       moodle:   { status: moodleStatus, url: moodleUrl || null },
     },
   });
@@ -226,14 +226,14 @@ const sendAdminMessage = async (req, res) => {
 
     let response, source;
 
-    if (isGroqAvailable()) {
-      const aiResponse = await sendToGroq(systemPrompt, history, message, { maxTokens: 1200 });
-      if (aiResponse) { response = aiResponse; source = 'groq'; }
+    if (isGeminiAvailable()) {
+      const aiResponse = await sendToGemini(systemPrompt, history, message, { maxTokens: 1200 });
+      if (aiResponse) { response = aiResponse; source = 'gemini'; }
     }
 
     if (!response) {
       const { totalStudents: ts, totalTeachers: tt, totalMessages: tm, activeUsers: au } = adminContext.stats;
-      response = `**SIRA Analytics** — Modo básico (Groq no disponible).\n\nEstado del sistema:\n- Estudiantes: ${ts} · Docentes: ${tt}\n- Mensajes en chat: ${tm} · Activos (7d): ${au}\n\nPara análisis avanzados activa \`GROQ_API_KEY\` en las variables de entorno.`;
+      response = `**SIRA Analytics** — Modo básico (Gemini no disponible).\n\nEstado del sistema:\n- Estudiantes: ${ts} · Docentes: ${tt}\n- Mensajes en chat: ${tm} · Activos (7d): ${au}\n\nPara análisis avanzados configura \`GEMINI_API_KEY\` en las variables de entorno.`;
       source = 'rules';
     }
 

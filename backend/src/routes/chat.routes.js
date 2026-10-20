@@ -5,16 +5,27 @@
 
 const express = require('express');
 const { body } = require('express-validator');
-const router = express.Router();
+const multer  = require('multer');
+const router  = express.Router();
 
 const { sendMessage, getChatHistory, getChatSessions } = require('../controllers/chat.controller');
 const { verifyToken, requireMoodleUser } = require('../middleware/auth.middleware');
 const { validate } = require('../middleware/validate.middleware');
 
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5 MB máximo
+  fileFilter: (_req, file, cb) => {
+    const allowed = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+    if (allowed.includes(file.mimetype)) cb(null, true);
+    else cb(new Error('Solo se permiten imágenes (JPG, PNG, GIF, WebP).'));
+  },
+});
+
 router.use(verifyToken, requireMoodleUser);
 
-// POST /api/chat/message   → enviar mensaje a ChatSIRA
-router.post('/message', [
+// POST /api/chat/message   → enviar mensaje a ChatSIRA (imagen opcional)
+router.post('/message', upload.single('image'), [
   body('message').notEmpty().trim().withMessage('El mensaje no puede estar vacío.'),
   body('sessionId').optional().isUUID().withMessage('SessionId inválido.'),
   validate,

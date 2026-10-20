@@ -43,13 +43,21 @@ export default function MessageBubble({ message, onDownload }) {
               : 'bg-white text-secondary border border-gray-100 rounded-bl-sm'
           }`}
         >
+          {/* Imagen adjunta (mensajes del usuario) */}
+          {message.imageUrl && (
+            <img
+              src={message.imageUrl}
+              alt="adjunto"
+              className="max-w-[220px] rounded-lg mb-2 border border-white/20"
+            />
+          )}
           <p
             className="whitespace-pre-wrap"
             dangerouslySetInnerHTML={{ __html: formatContent(message.content) }}
           />
           <span className={`text-xs mt-1 block ${isUser ? 'text-white/60' : 'text-gray-400'}`}>
             {new Date(message.createdAt).toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' })}
-            {message.source === 'groq' && (
+            {message.source === 'gemini' && (
               <span className="ml-2 bg-green-100 text-green-700 px-1.5 py-0.5 rounded text-[10px]">IA</span>
             )}
           </span>

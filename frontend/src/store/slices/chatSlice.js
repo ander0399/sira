@@ -9,9 +9,19 @@ import { v4 as uuidv4 } from 'uuid';
 import api from '../../services/api';
 
 /* Thunk: enviar mensaje y recibir respuesta de SIRA */
-export const sendMessage = createAsyncThunk('chat/send', async ({ message, sessionId, courseId }, { rejectWithValue }) => {
+export const sendMessage = createAsyncThunk('chat/send', async ({ message, sessionId, courseId, file }, { rejectWithValue }) => {
   try {
-    const { data } = await api.post('/chat/message', { message, sessionId, courseId });
+    let data;
+    if (file) {
+      const form = new FormData();
+      form.append('message', message);
+      if (sessionId) form.append('sessionId', sessionId);
+      if (courseId)  form.append('courseId', String(courseId));
+      form.append('image', file);
+      ({ data } = await api.post('/chat/message', form, { headers: { 'Content-Type': 'multipart/form-data' } }));
+    } else {
+      ({ data } = await api.post('/chat/message', { message, sessionId, courseId }));
+    }
     return data;
   } catch (err) {
     return rejectWithValue(err.response?.data?.message || 'Error al enviar el mensaje.');
@@ -63,9 +73,10 @@ const chatSlice = createSlice({
         state.error    = null;
         /* Agrega el mensaje del usuario de inmediato (sin esperar al backend) */
         state.messages.push({
-          role:      'user',
-          content:   meta.arg.message,
-          createdAt: new Date().toISOString(),
+          role:       'user',
+          content:    meta.arg.message,
+          imageUrl:   meta.arg.file ? URL.createObjectURL(meta.arg.file) : null,
+          createdAt:  new Date().toISOString(),
         });
         /* Inicializa la sesión si es el primer mensaje */
         if (!state.sessionId) state.sessionId = meta.arg.sessionId || uuidv4();

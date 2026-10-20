@@ -52,8 +52,8 @@ export default function Chat() {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, isTyping]);
 
-  const handleSend = (text) => {
-    dispatch(sendMessage({ message: text, sessionId, courseId: activeCourseId }));
+  const handleSend = (text, file) => {
+    dispatch(sendMessage({ message: text, sessionId, courseId: activeCourseId, file }));
   };
 
   const handleNewSession = () => dispatch(startNewSession());
@@ -69,7 +69,7 @@ export default function Chat() {
           <div>
             <p className="font-bold text-secondary text-sm">ChatSIRA</p>
             <p className="text-xs text-gray-400">
-              {aiAvailable ? '🟢 IA activa (Groq)' : '🟡 Modo básico (motor de reglas)'}
+              {aiAvailable ? '🟢 IA activa (Gemini)' : '🟡 Modo básico (motor de reglas)'}
               {activeCourse && (
                 <span className="ml-2 text-primary/80 font-medium">· {activeCourse.fullname}</span>
               )}

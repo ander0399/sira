@@ -149,13 +149,63 @@ const generateRecommendations = (studentContext) => {
  * @returns {boolean}
  */
 const isExerciseRequest = (message) => {
-  const exerciseKeywords = [
-    'resuelve', 'resuelva', 'dame la respuesta', 'hazme el ejercicio',
-    'escríbeme el código', 'dame el código completo', 'haz la tarea',
-    'dame la solución', 'completa el ejercicio', 'termina el código',
-    'cuál es la respuesta del', 'dime la respuesta',
+  const msg = message.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+  const exercisePatterns = [
+    // Solicitudes directas de solución
+    'resuelve', 'resuelva', 'dame la respuesta', 'dame la solucion',
+    'hazme el ejercicio', 'haz el ejercicio', 'haz la tarea', 'hazme la tarea',
+    'completa el ejercicio', 'termina el codigo', 'termina el ejercicio',
+    'cuál es la respuesta', 'cual es la respuesta', 'dime la respuesta',
+    'dime el resultado', 'cual es el resultado',
+    // Solicitudes de código completo
+    'escribeme el codigo', 'escribe el codigo', 'dame el codigo completo',
+    'dame el codigo', 'hazme el codigo', 'haz el codigo',
+    'escribe el programa', 'hazme el programa', 'crea el programa',
+    'escribe la funcion', 'escribe la clase', 'implementa el',
+    'codifica el', 'programa que', 'codigo para',
+    // Solicitudes de tarea/parcial
+    'resuelveme', 'haz por mi', 'hazlo por mi', 'respondeme el',
+    'resuelve el parcial', 'resuelve el taller', 'resuelve el quiz',
+    'desarrolla el ejercicio', 'desarrolla la actividad',
   ];
-  return exerciseKeywords.some(kw => message.toLowerCase().includes(kw));
+  return exercisePatterns.some(kw => msg.includes(kw));
+};
+
+// Materias y temas permitidos en SIRA
+const PERMITTED_SUBJECTS = [
+  'programacion', 'algoritmo', 'variable', 'ciclo', 'funcion', 'python', 'c++', 'java',
+  'fundamentos', 'codigo', 'pseudocodigo', 'diagrama de flujo', 'compilar', 'depurar',
+  'objeto', 'clase', 'herencia', 'polimorfismo', 'encapsulamiento', 'abstraccion', 'poo',
+  'interfaz', 'constructor', 'metodo', 'atributo', 'instancia', 'sobrecarga',
+  'arbol', 'lista', 'pila', 'cola', 'grafo', 'hash', 'bfs', 'dfs', 'estructura',
+  'complejidad', 'big o', 'ordenamiento', 'busqueda', 'recursion', 'nodo',
+  'sql', 'base de dato', 'tabla', 'join', 'consulta', 'normalizacion', 'relacional',
+  'postgresql', 'mysql', 'er', 'entidad', 'relacion', 'clave', 'indice', 'trigger',
+  'ingenieria', 'sistemas', 'semestre', 'materia', 'nota', 'progreso', 'calificacion',
+  'estudiar', 'aprender', 'entender', 'explicar', 'concepto', 'ejercicio', 'practica',
+  'tarea', 'parcial', 'taller', 'proyecto', 'recurso', 'bibliograf',
+];
+
+const OFF_TOPIC_TRIGGERS = [
+  'receta', 'cocina', 'comida', 'deporte', 'futbol', 'pelicula', 'musica', 'cancion',
+  'chiste', 'broma', 'historia de amor', 'politica', 'religion', 'noticias',
+  'medicina', 'salud', 'enfermedad', 'quimica', 'fisica', 'biologia', 'matematica',
+  'calculo', 'algebra', 'geometria', 'estadistica',
+  'translate', 'traducir al', 'redactar carta', 'escribeme un poema', 'escribe un cuento',
+];
+
+/**
+ * Detecta si el mensaje está fuera del alcance académico de SIRA.
+ * @param {string} message
+ * @returns {boolean}
+ */
+const isOffTopic = (message) => {
+  const msg = message.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+  const hasOffTrigger = OFF_TOPIC_TRIGGERS.some(kw => msg.includes(kw));
+  if (!hasOffTrigger) return false;
+  // Si tiene alguna palabra permitida también, no bloquear
+  const hasPermitted = PERMITTED_SUBJECTS.some(kw => msg.includes(kw));
+  return !hasPermitted;
 };
 
 /**
@@ -163,7 +213,7 @@ const isExerciseRequest = (message) => {
  * @returns {string}
  */
 const getExerciseRedirectResponse = () => {
-  return `Entiendo que quieres ayuda con ese ejercicio 😊, pero mi rol es guiarte para que lo resuelvas tú mismo — ¡así aprenderás mucho más!
+  return `Entiendo que quieres ayuda con ese ejercicio, pero mi rol es guiarte para que lo resuelvas tú mismo — ¡así aprenderás mucho más!
 
 Puedo ayudarte con:
 • **Explicación conceptual** del tema relacionado
@@ -171,12 +221,29 @@ Puedo ayudarte con:
 • **Ejemplos similares** (no idénticos) que te sirvan de referencia
 • **Recursos y bibliografía** donde profundizar
 
-¿Qué parte del tema te genera más duda? Cuéntame y te oriento paso a paso. 🎯`;
+¿Qué parte del tema te genera más duda? Cuéntame y te oriento paso a paso.`;
+};
+
+/**
+ * Respuesta cuando el tema está fuera del scope de SIRA.
+ * @returns {string}
+ */
+const getOffTopicResponse = () => {
+  return `Ese tema está fuera de mi alcance. Soy SIRA, un asistente académico especializado exclusivamente en las materias de Ingeniería de Sistemas de la UFPS:
+
+• **Fundamentos de Programación**
+• **Programación Orientada a Objetos (POO)**
+• **Estructuras de Datos y Algoritmos**
+• **Bases de Datos**
+
+¿Tienes alguna duda sobre alguna de estas materias? Con gusto te oriento.`;
 };
 
 module.exports = {
   generateRecommendations,
   isExerciseRequest,
+  isOffTopic,
   getExerciseRedirectResponse,
+  getOffTopicResponse,
   detectKBKey,
 };
