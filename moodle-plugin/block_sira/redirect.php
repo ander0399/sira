@@ -5,7 +5,7 @@
 require_once('../../config.php');
 require_login();
 
-global $DB, $USER;
+global $DB, $USER, $CFG;
 
 // Validar y limpiar el parámetro de rol
 $role = required_param('role', PARAM_ALPHA);
@@ -28,13 +28,39 @@ $service = $DB->get_record(
 );
 
 if (!$service) {
-    print_error('servicenotfound', 'block_sira', '', null, "Servicio '$serviceName' no encontrado o deshabilitado.");
+    print_error('servicenotfound', 'block_sira', '', null,
+        "Servicio '$serviceName' no encontrado o deshabilitado. " .
+        "Ve a Administración del sitio → Plugins → Servicios web → Servicios externos y habilita 'SIRA Academic Service'.");
 }
 
-// Generar (o recuperar) el token REST del usuario para este servicio.
-// external_generate_token_for_current_user() crea uno nuevo si no existe,
-// o devuelve el vigente si ya fue generado para este usuario+servicio.
-$tokenRecord = external_generate_token_for_current_user($service);
+// Buscar token permanente existente para este usuario+servicio.
+// Enfoque directo compatible con Moodle 4.4+ (external_generate_token_for_current_user fue removida en 4.4).
+$tokenRecord = $DB->get_record('external_tokens', [
+    'userid'            => $USER->id,
+    'externalserviceid' => $service->id,
+    'tokentype'         => EXTERNAL_TOKEN_PERMANENT,
+]);
+
+if (!$tokenRecord) {
+    $context = context_system::instance();
+
+    $tokendata                    = new stdClass();
+    $tokendata->token             = md5(uniqid(rand(), true));
+    $tokendata->privatetoken      = random_string(64);
+    $tokendata->tokentype         = EXTERNAL_TOKEN_PERMANENT;
+    $tokendata->userid            = $USER->id;
+    $tokendata->externalserviceid = $service->id;
+    $tokendata->contextid         = $context->id;
+    $tokendata->creatorid         = $USER->id;
+    $tokendata->timecreated       = time();
+    $tokendata->validuntil        = 0;
+    $tokendata->iprestriction     = null;
+    $tokendata->sid               = null;
+    $tokendata->lastaccess        = null;
+
+    $DB->insert_record('external_tokens', $tokendata);
+    $tokenRecord = $DB->get_record('external_tokens', ['token' => $tokendata->token]);
+}
 
 if (empty($tokenRecord->token)) {
     print_error('nopermission', 'block_sira');

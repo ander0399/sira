@@ -21,7 +21,7 @@ services:
   # Primera arrancada tarda 5-10 min mientras instala.
   # El plugin block_sira se monta directamente en el directorio de bloques.
   moodle:
-    image: bitnami/moodle:4
+    image: oksigenia/moodle:4.5
     restart: unless-stopped
     ports:
       - "8080:8080"
@@ -36,17 +36,36 @@ services:
       MOODLE_PASSWORD: Admin1234!
       MOODLE_EMAIL: admin@ufps.edu.co
       MOODLE_SITE_NAME: "UFPS - Plataforma Virtual"
-      MOODLE_HOST: localhost
+      MOODLE_HOST: localhost:8080
       MOODLE_HTTP_PORT_NUMBER: 8080
+      MOODLE_ENABLE_HTTPS: "no"
       MOODLE_SKIP_BOOTSTRAP: "no"
     volumes:
       - moodle_data:/bitnami/moodle
       - moodle_moodledata:/bitnami/moodledata
-      # Plugin block_sira montado directamente — disponible al terminar la instalación
-      - ./moodle-plugin/block_sira:/bitnami/moodle/blocks/sira
     depends_on:
       mariadb:
         condition: service_healthy
+
+  # ── Instalador del plugin block_sira ─────────────────────────────────────
+  # Espera a que Moodle termine su instalación inicial y copia el plugin.
+  moodle-plugin-installer:
+    image: alpine:3
+    volumes:
+      - moodle_data:/bitnami/moodle
+      - ./moodle-plugin/block_sira:/tmp/block_sira:ro
+    command: >
+      sh -c "
+        echo 'Esperando instalación de Moodle...';
+        until [ -f /bitnami/moodle/config.php ]; do sleep 15; done;
+        mkdir -p /bitnami/moodle/blocks/sira;
+        cp -rT /tmp/block_sira /bitnami/moodle/blocks/sira;
+        chmod -R 755 /bitnami/moodle/blocks/sira;
+        echo 'Plugin block_sira instalado correctamente.';
+      "
+    depends_on:
+      - moodle
+    restart: on-failure:5
 
   # ── Base de datos de SIRA (PostgreSQL) ───────────────────────────────────
   postgres:
@@ -87,6 +106,8 @@ services:
       FRONTEND_URL: http://localhost:5173
       # Backend llama a Moodle por la red interna de Docker
       MOODLE_URL: http://moodle:8080
+      # Host canónico que Moodle espera (debe coincidir con wwwroot en Moodle)
+      MOODLE_CANONICAL_HOST: localhost:8080
       # Gemini API (opcional — sin GEMINI_API_KEY el sistema usa solo motor de reglas)
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       GEMINI_MODEL: ${GEMINI_MODEL:-gemini-flash-lite-latest}

@@ -10,13 +10,11 @@ require('dotenv').config();
 const MOODLE_URL = process.env.MOODLE_URL;
 const REST_ENDPOINT = `${MOODLE_URL}/webservice/rest/server.php`;
 
-/**
- * Realiza una llamada a la REST API de Moodle.
- * @param {string} wsfunction - Nombre de la función Moodle a invocar.
- * @param {object} params - Parámetros adicionales de la función.
- * @param {string} token - Token del usuario o del servicio.
- * @returns {Promise<object>} - Respuesta JSON de Moodle.
- */
+// El Host header que Moodle espera (debe coincidir con wwwroot configurado en Moodle).
+// El backend se conecta por red Docker (moodle:8080) pero Moodle valida el Host header
+// contra su wwwroot (localhost:8080), de lo contrario devuelve 303 por host mismatch.
+const MOODLE_CANONICAL_HOST = process.env.MOODLE_CANONICAL_HOST || 'localhost:8080';
+
 const callMoodle = async (wsfunction, params = {}, token) => {
   const response = await axios.get(REST_ENDPOINT, {
     params: {
@@ -25,6 +23,7 @@ const callMoodle = async (wsfunction, params = {}, token) => {
       moodlewsrestformat: 'json',
       ...params,
     },
+    headers: { Host: MOODLE_CANONICAL_HOST },
     timeout: 10000,
   });
 

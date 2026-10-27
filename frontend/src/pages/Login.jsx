@@ -8,7 +8,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { moodleLogin, adminLogin, clearError } from '../store/slices/authSlice';
+import { moodleLogin, adminLogin, clearError, logout } from '../store/slices/authSlice';
 import { setActiveCourse } from '../store/slices/chatSlice';
 import Button from '../components/shared/Button';
 import Input  from '../components/shared/Input';
@@ -22,6 +22,12 @@ export default function Login() {
   const [adminForm, setAdminForm] = useState({ email: '', password: '' });
   const autoLoginFired = useRef(false);
   const isAutoLogin    = !!(searchParams.get('moodleToken') && searchParams.get('role'));
+
+  // Si llega auto-login desde Moodle, limpiar sesión previa (ej: admin en localStorage)
+  // antes de que el efecto de navegación pueda redirigir con el token antiguo.
+  useEffect(() => {
+    if (isAutoLogin) dispatch(logout());
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Auto-login desde el plugin de Moodle
   useEffect(() => {

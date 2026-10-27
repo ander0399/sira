@@ -27,7 +27,7 @@ router.use(verifyToken, requireMoodleUser);
 // POST /api/chat/message   → enviar mensaje a ChatSIRA (imagen opcional)
 router.post('/message', upload.single('image'), [
   body('message').notEmpty().trim().withMessage('El mensaje no puede estar vacío.'),
-  body('sessionId').optional().isUUID().withMessage('SessionId inválido.'),
+  body('sessionId').optional({ nullable: true }).isUUID().withMessage('SessionId inválido.'),
   validate,
 ], sendMessage);
 
