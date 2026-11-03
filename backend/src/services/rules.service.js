@@ -13,6 +13,16 @@
 
 const knowledgeBase = require('../data/knowledge');
 
+/** Devuelve N elementos distintos seleccionados aleatoriamente del array. */
+const pickRandom = (arr, n) => {
+  const copy = [...arr];
+  for (let i = copy.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [copy[i], copy[j]] = [copy[j], copy[i]];
+  }
+  return copy.slice(0, n);
+};
+
 // BD antes que ESTR_DATOS para evitar que 'dato' en ESTR_DATOS capture cursos de BD
 const KB_KEYWORDS = {
   BD:        ['base de dato', 'bases de dato', 'sql', 'base datos'],
@@ -132,11 +142,38 @@ const generateRecommendations = (studentContext) => {
     });
   });
 
-  // ── Regla 5: Estrategias generales (siempre se incluye una) ──────────────
+  // ── Regla 4b: Cursos sin progreso bajo ni alto → sugerencia de inicio/KB ─
+  const coveredCourseIds = new Set([
+    ...lowProgressCourses.map(c => c.id),
+    ...goodProgressCourses.map(c => c.id),
+  ]);
+  const midProgressCourses = courses.filter(c => !coveredCourseIds.has(c.id));
+
+  midProgressCourses.forEach(course => {
+    const kbKey = detectKBKey(course.fullname);
+    const kb = kbKey ? knowledgeBase[kbKey] : null;
+    if (!kb) return;
+
+    const strategy = pickRandom(kb.studyStrategies, 1)[0];
+    const resource = kb.resources[0];
+
+    recommendations.push({
+      type: 'recurso',
+      title: `Consejos para ${course.fullname}`,
+      description: `${strategy} Recurso sugerido: ${resource.title}.`,
+      moodleCourseId: course.id,
+      moodleCourseName: course.fullname,
+      metadata: { resources: [resource] },
+      source: 'rules',
+    });
+  });
+
+  // ── Regla 5: Estrategia general aleatoria (rota entre las 6 disponibles) ─
+  const generalStrategies = pickRandom(knowledgeBase.GENERAL.studyStrategies, 3);
   recommendations.push({
     type: 'estrategia',
-    title: 'Técnicas de estudio recomendadas',
-    description: knowledgeBase.GENERAL.studyStrategies.slice(0, 3).join(' | '),
+    title: 'Técnica de estudio recomendada',
+    description: generalStrategies.join(' | '),
     source: 'rules',
   });
 

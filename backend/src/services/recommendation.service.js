@@ -15,6 +15,7 @@ const { generateRecommendations, isExerciseRequest, isOffTopic, getExerciseRedir
 const { buildSystemPrompt, buildTeacherSystemPrompt, retrieveContext } = require('./rag.service');
 const { sendToGemini, isGeminiAvailable } = require('./gemini.service');
 const { Recommendation } = require('../models');
+const { Op } = require('sequelize');
 
 /**
  * Procesa un mensaje de chat y genera la respuesta de SIRA.
@@ -127,17 +128,30 @@ const generateRulesBasedChatResponse = (message, context) => {
 const generateAndSaveRecommendations = async (moodleUserId, studentContext) => {
   const rawRecommendations = generateRecommendations(studentContext);
 
-  const toCreate = rawRecommendations.map(rec => ({
-    moodleUserId,
-    type: rec.type,
-    title: rec.title,
-    description: rec.description,
-    moodleCourseId:   rec.moodleCourseId   || null,
-    moodleCourseName: rec.moodleCourseName || null,
-    source: rec.source || 'rules',
-    metadata: rec.metadata || {},
-  }));
+  // Evitar duplicados: no crear recomendaciones con mismo type+title+curso en los últimos 7 días
+  const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+  const existing = await Recommendation.findAll({
+    where: { moodleUserId, createdAt: { [Op.gte]: sevenDaysAgo } },
+    attributes: ['type', 'moodleCourseId', 'title'],
+  });
+  const existingKeys = new Set(
+    existing.map(r => `${r.type}|${r.moodleCourseId ?? ''}|${r.title}`)
+  );
 
+  const toCreate = rawRecommendations
+    .filter(rec => !existingKeys.has(`${rec.type}|${rec.moodleCourseId ?? ''}|${rec.title}`))
+    .map(rec => ({
+      moodleUserId,
+      type: rec.type,
+      title: rec.title,
+      description: rec.description,
+      moodleCourseId:   rec.moodleCourseId   || null,
+      moodleCourseName: rec.moodleCourseName || null,
+      source: rec.source || 'rules',
+      metadata: rec.metadata || {},
+    }));
+
+  if (toCreate.length === 0) return [];
   return Recommendation.bulkCreate(toCreate);
 };
 

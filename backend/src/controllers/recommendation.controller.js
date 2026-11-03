@@ -43,10 +43,21 @@ const generateRecommendations = async (req, res) => {
     // Obtener cursos del estudiante desde Moodle
     const courses = await moodleService.getUserCourses(moodleUserId, moodleToken);
 
+    // Obtener calificaciones por curso para enriquecer las reglas
+    const gradesArrays = await Promise.all(
+      (courses || []).map(c =>
+        moodleService.getUserGrades(c.id, moodleUserId, moodleToken)
+          .then(resp => moodleService.normalizeGrades(resp, c.id, c.fullname))
+          .catch(() => [])
+      )
+    );
+    const grades = gradesArrays.flat();
+
     const studentContext = {
       moodleUserId,
       fullName,
       courses: courses || [],
+      grades,
     };
 
     const recommendations = await generateAndSaveRecommendations(moodleUserId, studentContext);

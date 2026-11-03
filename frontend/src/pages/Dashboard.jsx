@@ -127,7 +127,17 @@ export default function Dashboard() {
             <h2 className="font-bold text-secondary flex items-center gap-2">
               ✨ Recomendaciones
             </h2>
-            {recLoading && <Spinner size="sm" />}
+            <div className="flex items-center gap-2">
+              {recLoading && <Spinner size="sm" />}
+              {recommendations.length > 0 && (
+                <button
+                  onClick={() => navigate('/reports')}
+                  className="text-xs text-primary hover:underline"
+                >
+                  Ver todas →
+                </button>
+              )}
+            </div>
           </div>
           {recommendations.length === 0 ? (
             <div className="text-center py-4">
@@ -141,9 +151,9 @@ export default function Dashboard() {
               {recommendations.slice(0, 4).map((rec) => (
                 <li key={rec.id} className={`flex items-start gap-3 text-sm p-2 rounded-lg ${rec.isRead ? 'opacity-60' : 'bg-gray-50'}`}>
                   <span className="text-xl shrink-0">{RECOMMENDATION_TYPES[rec.type]?.icon || '📌'}</span>
-                  <div>
+                  <div className="min-w-0">
                     <p className="font-medium text-secondary">{rec.title}</p>
-                    <p className="text-xs text-gray-500 mt-0.5 line-clamp-2">{rec.description}</p>
+                    <p className="text-xs text-gray-500 mt-0.5 line-clamp-3">{rec.description}</p>
                     {rec.moodleCourseName && (
                       <span className="text-xs text-primary/70 mt-1 inline-block">{rec.moodleCourseName}</span>
                     )}
