@@ -11,11 +11,11 @@
  *   }
  */
 
-const { generateRecommendations, isExerciseRequest, isOffTopic, getExerciseRedirectResponse, getOffTopicResponse } = require('./rules.service');
+const { generateRecommendations, isExerciseRequest, isOffTopic, getExerciseRedirectResponse, getOffTopicResponse, isAcademicDistress, getDistressResponse } = require('./rules.service');
 const { buildSystemPrompt, buildTeacherSystemPrompt, retrieveContext } = require('./rag.service');
 const { sendToGemini, isGeminiAvailable } = require('./gemini.service');
+const { getOrBuildIndex, searchIndex } = require('./courseIndex.service');
 const { Recommendation } = require('../models');
-const { Op } = require('sequelize');
 
 /**
  * Procesa un mensaje de chat y genera la respuesta de SIRA.
@@ -26,31 +26,64 @@ const { Op } = require('sequelize');
  * @returns {{ response: string, source: string }}
  */
 const processChat = async (userMessage, studentContext, imageData = null) => {
-  const { profile } = studentContext;
+  const { profile, activeCourseId, moodleToken } = studentContext;
 
-  // Restricción pedagógica: no resolver ejercicios directamente (solo para estudiantes)
+  // ── Nivel 1: filtros locales (0 tokens) ─────────────────────────────────
+
+  // Detector de angustia académica — respuesta empática antes que nada
+  if (profile.role === 'student' && isAcademicDistress(userMessage)) {
+    return { response: getDistressResponse(studentContext), source: 'rules' };
+  }
+
+  // No resolver ejercicios directamente
   if (profile.role === 'student' && isExerciseRequest(userMessage)) {
     return { response: getExerciseRedirectResponse(), source: 'rules' };
   }
 
-  // Restricción de scope: solo materias permitidas (solo para estudiantes)
+  // Fuera del scope académico
   if (profile.role === 'student' && isOffTopic(userMessage)) {
     return { response: getOffTopicResponse(), source: 'rules' };
   }
 
-  // Seleccionar prompt según el rol del usuario
+  // ── Nivel 2: búsqueda en material del curso (0 tokens) ──────────────────
+  let courseContext = '';
+
+  if (profile.role === 'student' && activeCourseId && moodleToken) {
+    try {
+      const index = await getOrBuildIndex(activeCourseId, moodleToken);
+      const { pageSnippets, citedResources, found } = searchIndex(index, userMessage);
+
+      if (found) {
+        // Si encontramos contenido textual en Páginas → responder directamente
+        if (pageSnippets) {
+          courseContext = `\n\nMATERIAL DEL CURSO (úsalo como fuente principal para responder):\n${pageSnippets}`;
+        }
+        // Siempre adjuntar recursos citables si existen
+        if (citedResources) {
+          courseContext += `\n\nRECURSOS RELACIONADOS EN EL CURSO:\n${citedResources}`;
+        }
+      }
+    } catch {
+      // Si el índice falla, continúa normalmente
+    }
+  }
+
+  // ── Nivel 3: LLM con contexto enriquecido ────────────────────────────────
   const systemPrompt = profile.role === 'teacher'
     ? buildTeacherSystemPrompt(studentContext)
     : buildSystemPrompt(studentContext);
 
   if (isGeminiAvailable()) {
+    // RAG del KB solo para materias NO cubiertas por el índice del curso
     const ragContext = profile.role === 'student'
       ? retrieveContext(userMessage, studentContext.courses || [])
       : '';
 
-    const enrichedPrompt = ragContext
-      ? `${systemPrompt}\n\nCONTEXTO ADICIONAL RELEVANTE:\n${ragContext}`
-      : systemPrompt;
+    const enrichedPrompt = [
+      systemPrompt,
+      courseContext,
+      ragContext ? `\nCONTEXTO ADICIONAL DEL KB:\n${ragContext}` : '',
+    ].filter(Boolean).join('');
 
     const aiResponse = await sendToGemini(
       enrichedPrompt,
@@ -59,10 +92,10 @@ const processChat = async (userMessage, studentContext, imageData = null) => {
       { imageData }
     );
 
-    if (aiResponse) return { response: aiResponse, source: 'gemini' };
+    if (aiResponse) return { response: aiResponse, source: courseContext ? 'course+gemini' : 'gemini' };
   }
 
-  // Fallback: motor de reglas
+  // ── Nivel 4: fallback de reglas (0 tokens) ───────────────────────────────
   return generateRulesBasedChatResponse(userMessage, studentContext);
 };
 
@@ -121,35 +154,29 @@ const generateRulesBasedChatResponse = (message, context) => {
 
 /**
  * Genera y persiste recomendaciones para un estudiante Moodle.
+ * Reemplaza las recomendaciones anteriores con las recién calculadas,
+ * garantizando que siempre reflejan el estado académico actual.
+ *
  * @param {number} moodleUserId
- * @param {Object} studentContext - { profile, courses, grades }
+ * @param {Object} studentContext - { courses, grades }
  * @returns {Array}
  */
 const generateAndSaveRecommendations = async (moodleUserId, studentContext) => {
   const rawRecommendations = generateRecommendations(studentContext);
 
-  // Evitar duplicados: no crear recomendaciones con mismo type+title+curso en los últimos 7 días
-  const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-  const existing = await Recommendation.findAll({
-    where: { moodleUserId, createdAt: { [Op.gte]: sevenDaysAgo } },
-    attributes: ['type', 'moodleCourseId', 'title'],
-  });
-  const existingKeys = new Set(
-    existing.map(r => `${r.type}|${r.moodleCourseId ?? ''}|${r.title}`)
-  );
+  // Eliminar las recomendaciones previas del estudiante para evitar acumulación
+  await Recommendation.destroy({ where: { moodleUserId } });
 
-  const toCreate = rawRecommendations
-    .filter(rec => !existingKeys.has(`${rec.type}|${rec.moodleCourseId ?? ''}|${rec.title}`))
-    .map(rec => ({
-      moodleUserId,
-      type: rec.type,
-      title: rec.title,
-      description: rec.description,
-      moodleCourseId:   rec.moodleCourseId   || null,
-      moodleCourseName: rec.moodleCourseName || null,
-      source: rec.source || 'rules',
-      metadata: rec.metadata || {},
-    }));
+  const toCreate = rawRecommendations.map(rec => ({
+    moodleUserId,
+    type:             rec.type,
+    title:            rec.title,
+    description:      rec.description,
+    moodleCourseId:   rec.moodleCourseId   ?? null,
+    moodleCourseName: rec.moodleCourseName ?? null,
+    source:           rec.source           ?? 'rules',
+    metadata:         rec.metadata         ?? {},
+  }));
 
   if (toCreate.length === 0) return [];
   return Recommendation.bulkCreate(toCreate);

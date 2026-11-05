@@ -13,7 +13,7 @@
  */
 
 const knowledgeBase = require('../data/knowledge');
-const { detectKBKey } = require('./rules.service');
+const { detectKBKey, classifyStudentStatus } = require('./rules.service');
 
 /**
  * Construye el prompt de sistema para estudiantes autenticados vía Moodle.
@@ -37,34 +37,42 @@ const buildSystemPrompt = (studentContext) => {
       }).join('\n')
     : '  No hay cursos registrados en Moodle.';
 
+  // Índice rápido: courseId → gradeEntry (para clasificación combinada)
+  const gradesByCourse = {};
+  grades.forEach(g => { gradesByCourse[g.courseId] = g; });
+
+  // Cursos en riesgo usando la misma clasificación que el motor de reglas
   const atRiskCourses = courses
-    .filter(c => c.progress !== null && c.progress < 40)
-    .map(c => `${c.fullname} (${c.progress}%)`)
+    .filter(c => classifyStudentStatus(c, gradesByCourse[c.id] ?? null).level === 'en_riesgo')
+    .map(c => {
+      const { effectiveProgress } = classifyStudentStatus(c, gradesByCourse[c.id] ?? null);
+      return effectiveProgress !== null ? `${c.fullname} (${effectiveProgress}%)` : c.fullname;
+    })
     .join(', ');
 
-  // Resumen de calificaciones si están disponibles
+  // Resumen de calificaciones comprimido: solo actividades con problemas + conteo de aprobadas
   let gradesSummary = '';
   if (grades.length > 0) {
-    gradesSummary = '\nCALIFICACIONES DISPONIBLES:\n' + grades.map(g => {
-      const items = g.items
-        .filter(i => i.percentage !== null)
-        .map(i => `    - ${i.name}: ${i.percentage}%`)
-        .join('\n');
-      return `  [${g.courseName}]\n${items || '    Sin calificaciones aún'}`;
+    const sections = grades.map(g => {
+      const all    = g.items.filter(i => i.percentage !== null);
+      const failed = all.filter(i => i.percentage < 70);
+      const passed = all.length - failed.length;
+      const failedText = failed.length > 0
+        ? `\n    Bajo rendimiento: ${failed.map(i => `${i.name} (${i.percentage}%)`).join(', ')}`
+        : '';
+      return `  [${g.courseName}] ${passed} actividad(es) aprobada(s)${failedText}`;
     }).join('\n');
+    gradesSummary = `\nCALIFICACIONES:\n${sections}`;
   }
 
-  // Conocimiento específico de las materias en curso
+  // KB de materias en curso — solo para las que tienen KB conocida
+  // retrieveContext no repite estas materias para evitar duplicación de tokens
   const relevantKnowledge = courses
     .map(c => {
       const kbKey = detectKBKey(c.fullname);
       if (!kbKey) return '';
       const kb = knowledgeBase[kbKey];
-      return `
-[Materia: ${kb.name}]
-Temas principales: ${kb.topics.slice(0, 4).join(', ')}
-Errores comunes: ${kb.commonMistakes.slice(0, 2).join('; ')}
-Estrategias recomendadas: ${kb.studyStrategies.slice(0, 2).join('; ')}`;
+      return `[${kb.name}] Temas: ${kb.topics.slice(0, 4).join(', ')}. Errores: ${kb.commonMistakes.slice(0, 2).join('; ')}.`;
     })
     .filter(Boolean)
     .join('\n');
@@ -159,31 +167,32 @@ INSTRUCCIONES DE COMPORTAMIENTO:
 };
 
 /**
- * Recupera contexto relevante del knowledge base según la consulta y cursos activos.
+ * Recupera contexto adicional del KB solo para materias que la query menciona
+ * pero que NO están en los cursos inscritos del estudiante (evita duplicar tokens
+ * con lo que buildSystemPrompt ya incluyó).
+ *
  * @param {string} query
  * @param {Array}  courses - Cursos del estudiante desde Moodle
  * @returns {string}
  */
 const retrieveContext = (query, courses = []) => {
-  const queryLower = query.toLowerCase();
+  const normalizedQuery = query.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
   const relevantSections = [];
 
   const keywordMap = {
-    FUND_PROG:  ['programacion', 'algoritmo', 'variable', 'ciclo', 'funcion', 'python', 'c++', 'fundamentos'],
-    POO:        ['objeto', 'clase', 'herencia', 'polimorfismo', 'encapsulamiento', 'java', 'poo', 'orientado'],
-    ESTR_DATOS: ['arbol', 'lista', 'pila', 'cola', 'grafo', 'hash', 'bfs', 'dfs', 'estructura', 'complejidad', 'big o'],
-    BD:         ['sql', 'base de datos', 'tabla', 'join', 'consulta', 'normalizacion', 'relacional', 'postgresql'],
+    FUND_PROG:  ['programacion', 'algoritmo', 'variable', 'ciclo', 'funcion', 'python', 'fundamentos'],
+    POO:        ['objeto', 'clase', 'herencia', 'polimorfismo', 'encapsulamiento', 'poo', 'orientado'],
+    ESTR_DATOS: ['arbol', 'lista', 'pila', 'cola', 'grafo', 'hash', 'bfs', 'dfs', 'estructura', 'big o'],
+    BD:         ['sql', 'base de datos', 'tabla', 'join', 'consulta', 'normalizacion', 'relacional'],
   };
 
-  const activeCourseKeys = courses.map(c => detectKBKey(c.fullname)).filter(Boolean);
+  // Materias ya cubiertas en el system prompt — no repetir
+  const enrolledKeys = new Set(courses.map(c => detectKBKey(c.fullname)).filter(Boolean));
 
   Object.entries(keywordMap).forEach(([code, keywords]) => {
-    // Normalizar query para comparación sin acentos
-    const normalizedQuery = queryLower.normalize('NFD').replace(/[̀-ͯ]/g, '');
-    const matchesQuery   = keywords.some(kw => normalizedQuery.includes(kw));
-    const matchesCourses = activeCourseKeys.includes(code);
-
-    if ((matchesQuery || matchesCourses) && knowledgeBase[code]) {
+    // Solo aportar contexto si: la query menciona esta materia Y no está en cursos inscritos
+    const matchesQuery = keywords.some(kw => normalizedQuery.includes(kw));
+    if (matchesQuery && !enrolledKeys.has(code) && knowledgeBase[code]) {
       const kb = knowledgeBase[code];
       relevantSections.push(
         `[${kb.name}] Temas: ${kb.topics.slice(0, 3).join(', ')}. Estrategias: ${kb.studyStrategies.slice(0, 2).join('; ')}.`

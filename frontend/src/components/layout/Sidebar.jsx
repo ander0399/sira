@@ -43,7 +43,6 @@ export default function Sidebar({ isOpen, onClose }) {
           fixed top-16 left-0 z-20 h-[calc(100vh-4rem)] w-60
           bg-primary text-white flex flex-col
           transition-transform duration-300
-          md:translate-x-0
           ${isOpen ? 'translate-x-0' : '-translate-x-full'}
         `}
       >

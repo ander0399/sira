@@ -2,7 +2,7 @@ services:
 
   # ── Base de datos de Moodle (MariaDB) ────────────────────────────────────
   mariadb:
-    image: mariadb:10.6
+    image: mariadb:11.4
     restart: unless-stopped
     environment:
       MYSQL_ROOT_PASSWORD: rootpass2026
@@ -12,16 +12,16 @@ services:
     volumes:
       - mariadb_data:/var/lib/mysql
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-prootpass2026"]
+      test: ["CMD", "mariadb-admin", "ping", "-h", "127.0.0.1", "-u", "root", "-prootpass2026"]
       interval: 10s
       timeout: 5s
       retries: 10
 
-  # ── Moodle 4.x ───────────────────────────────────────────────────────────
+  # ── Moodle 5.3 (misma versión que uvirtual.cloud.ufps.edu.co) ─────────────
   # Primera arrancada tarda 5-10 min mientras instala.
   # El plugin block_sira se monta directamente en el directorio de bloques.
   moodle:
-    image: oksigenia/moodle:4.5
+    image: oksigenia/moodle:5.3
     restart: unless-stopped
     ports:
       - "8080:8080"

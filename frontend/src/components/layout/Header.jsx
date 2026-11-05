@@ -13,7 +13,12 @@ export default function Header({ onMenuClick }) {
 
   const handleLogout = () => {
     dispatch(logout());
-    navigate('/login');
+    if (window !== window.parent) {
+      // Dentro del bloque Moodle: cierra el widget en lugar de navegar al login admin
+      window.parent.postMessage({ type: 'sira-close' }, '*');
+    } else {
+      navigate('/login');
+    }
   };
 
   return (
@@ -23,8 +28,8 @@ export default function Header({ onMenuClick }) {
         {/* Botón menú hamburguesa (solo mobile) */}
         <button
           onClick={onMenuClick}
-          className="md:hidden text-white p-1 rounded"
-          aria-label="Abrir menú"
+          className="text-white p-1 rounded hover:bg-white/20 transition"
+          aria-label="Abrir/cerrar menú"
         >
           <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />

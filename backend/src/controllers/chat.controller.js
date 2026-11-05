@@ -9,6 +9,7 @@ const { ChatMessage } = require('../models');
 const { processChat } = require('../services/recommendation.service');
 const { isGeminiAvailable } = require('../services/gemini.service');
 const moodleService = require('../services/moodle.service');
+const { getOrBuildIndex } = require('../services/courseIndex.service');
 
 /**
  * POST /api/chat/message
@@ -40,15 +41,20 @@ const sendMessage = async (req, res) => {
         courses = await moodleService.getUserCourses(moodleUserId, moodleToken);
         courses = Array.isArray(courses) ? courses : [];
 
-        // Prioridad: curso desde el que se abrió el plugin; fallback: primer curso con bajo progreso
+        // Prioridad 1: curso desde el que se abrió el plugin
+        // Prioridad 2: primer curso con bajo progreso
+        // Fallback:    primer curso disponible (garantiza que siempre haya contexto de notas)
         const targetCourseId = courseId ? parseInt(courseId) : null;
         const targetCourse   = targetCourseId
           ? courses.find(c => c.id === targetCourseId)
-          : courses.find(c => c.progress !== null && c.progress < 40);
+          : (courses.find(c => c.progress !== null && c.progress < 40) ?? courses[0]);
 
         if (targetCourse) {
           const gradesRaw = await moodleService.getUserGrades(targetCourse.id, moodleUserId, moodleToken);
           grades = moodleService.normalizeGrades(gradesRaw, targetCourse.id, targetCourse.fullname);
+
+          // Indexar contenido del curso en segundo plano (no bloquea la respuesta)
+          getOrBuildIndex(targetCourse.id, moodleToken).catch(() => {});
 
           // Para docentes: obtener lista de estudiantes inscritos en el curso activo
           if (role === 'teacher') {
@@ -76,13 +82,17 @@ const sendMessage = async (req, res) => {
       }
     }
 
+    // Pasar el courseId activo para que processChat pueda buscar en el índice
+    const activeCourseId = courseId ? parseInt(courseId) : (targetCourse?.id ?? null);
+
     const studentContext = {
       profile: { name: fullName, moodleUserId, role },
       courses,
       grades,
-      activeCourseId: courseId ? parseInt(courseId) : null,
+      activeCourseId,
       enrolledStudents,
       chatHistory: chatHistory.map(m => ({ role: m.role, content: m.content })),
+      moodleToken,  // necesario para que processChat acceda al índice si no está en caché
     };
 
     // Guardar mensaje del usuario
@@ -110,8 +120,8 @@ const sendMessage = async (req, res) => {
     });
 
     res.json({
-      message: response,
-      sessionId: activeSessionId,
+      message:     response,
+      sessionId:   activeSessionId,
       source,
       aiAvailable: isGeminiAvailable(),
     });

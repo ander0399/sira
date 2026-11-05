@@ -23,6 +23,58 @@ const pickRandom = (arr, n) => {
   return copy.slice(0, n);
 };
 
+/**
+ * Clasifica el estado académico del estudiante en un curso combinando
+ * su porcentaje de progreso Moodle y sus calificaciones reales.
+ *
+ * Niveles:
+ *   en_riesgo      — necesita intervención inmediata
+ *   necesita_mejora — rendimiento por debajo del promedio esperado
+ *   en_buen_camino  — avance aceptable
+ *   destacado       — rendimiento sobresaliente
+ *   sin_datos       — ni progreso ni calificaciones disponibles
+ *
+ * @param {{ progress: number|null }} course
+ * @param {{ items: Array<{ name, percentage }> }|null} gradeEntry
+ * @returns {{ level: string, effectiveProgress: number|null, avgGrade: number|null, worstItems: Array }}
+ */
+const classifyStudentStatus = (course, gradeEntry) => {
+  const progress = (course.progress !== null && course.progress !== undefined)
+    ? course.progress
+    : null;
+
+  const gradedItems = gradeEntry?.items?.filter(i => i.percentage !== null) ?? [];
+  const avgGrade = gradedItems.length > 0
+    ? Math.round(gradedItems.reduce((sum, i) => sum + i.percentage, 0) / gradedItems.length)
+    : null;
+
+  // Activities failing below 60%, sorted worst first
+  const worstItems = gradedItems
+    .filter(i => i.percentage < 60)
+    .sort((a, b) => a.percentage - b.percentage)
+    .slice(0, 3);
+
+  // Use Moodle completion progress when available; fall back to grade average as proxy
+  const effectiveProgress = progress !== null ? progress : avgGrade;
+
+  if (effectiveProgress === null) {
+    return { level: 'sin_datos', effectiveProgress: null, avgGrade: null, worstItems: [] };
+  }
+
+  let level;
+  if (effectiveProgress < 45 || (avgGrade !== null && avgGrade < 50)) {
+    level = 'en_riesgo';
+  } else if (effectiveProgress < 65 || (avgGrade !== null && avgGrade < 70)) {
+    level = 'necesita_mejora';
+  } else if (effectiveProgress < 85) {
+    level = 'en_buen_camino';
+  } else {
+    level = 'destacado';
+  }
+
+  return { level, effectiveProgress, avgGrade, worstItems };
+};
+
 // BD antes que ESTR_DATOS para evitar que 'dato' en ESTR_DATOS capture cursos de BD
 const KB_KEYWORDS = {
   BD:        ['base de dato', 'bases de dato', 'sql', 'base datos'],
@@ -50,130 +102,182 @@ const detectKBKey = (courseName) => {
 
 /**
  * Genera recomendaciones para un estudiante según sus cursos y calificaciones Moodle.
- * @param {Object} studentContext - { profile, courses, grades }
+ * Clasifica cada curso individualmente (en_riesgo / necesita_mejora / en_buen_camino /
+ * destacado / sin_datos) y produce recomendaciones específicas al estado real del estudiante.
+ *
+ * @param {Object} studentContext - { courses, grades }
  * @returns {Array}
  */
 const generateRecommendations = (studentContext) => {
-  const { profile, courses = [], grades = [] } = studentContext;
+  const { courses = [], grades = [] } = studentContext;
   const recommendations = [];
 
-  const lowProgressCourses  = courses.filter(c => c.progress !== null && c.progress !== undefined && c.progress < 40);
-  const goodProgressCourses = courses.filter(c => c.progress !== null && c.progress !== undefined && c.progress >= 75);
+  // Índice rápido: courseId → gradeEntry
+  const gradesByCourse = {};
+  grades.forEach(g => { gradesByCourse[g.courseId] = g; });
 
-  // ── Regla 1: Cursos con progreso bajo ────────────────────────────────────
-  lowProgressCourses.forEach(course => {
+  const atRiskCourses = [];
+
+  // ── Análisis por curso ───────────────────────────────────────────────────
+  courses.forEach(course => {
+    const gradeEntry = gradesByCourse[course.id] ?? null;
+    const { level, effectiveProgress, avgGrade, worstItems } = classifyStudentStatus(course, gradeEntry);
     const kbKey = detectKBKey(course.fullname);
-    const kb = kbKey ? knowledgeBase[kbKey] : null;
+    const kb    = kbKey ? knowledgeBase[kbKey] : null;
 
-    recommendations.push({
-      type: 'alerta',
-      title: `Bajo progreso en ${course.fullname}`,
-      description: `Tu avance es del ${course.progress}%. ${knowledgeBase.GENERAL.alertMessages.highRiskSubject}${kb ? ` Temas clave: ${kb.topics.slice(0, 3).join(', ')}.` : ''}`,
-      moodleCourseId: course.id,
-      moodleCourseName: course.fullname,
-      source: 'rules',
-    });
+    switch (level) {
 
-    if (kb) {
-      recommendations.push({
-        type: 'recurso',
-        title: `Recursos recomendados para ${course.fullname}`,
-        description: `Para reforzar este curso: ${kb.resources.map(r => r.title).join(', ')}.`,
-        moodleCourseId: course.id,
-        moodleCourseName: course.fullname,
-        metadata: { resources: kb.resources },
-        source: 'rules',
-      });
+      case 'en_riesgo': {
+        atRiskCourses.push(course);
+
+        // Descripción específica según qué dato tenemos
+        let alertDesc = '';
+        if (worstItems.length > 0) {
+          alertDesc = `Actividades con rendimiento crítico: ${worstItems.map(i => `${i.name} (${i.percentage}%)`).join(', ')}. `;
+        }
+        if (effectiveProgress !== null) {
+          alertDesc += `Avance actual: ${effectiveProgress}%. `;
+        }
+        alertDesc += kb
+          ? `${knowledgeBase.GENERAL.alertMessages.highRiskSubject} Temas críticos a repasar: ${kb.topics.slice(0, 3).join(', ')}.`
+          : knowledgeBase.GENERAL.alertMessages.highRiskSubject;
+
+        recommendations.push({
+          type: 'alerta',
+          title: `Atención urgente: ${course.fullname}`,
+          description: alertDesc.trim(),
+          moodleCourseId: course.id,
+          moodleCourseName: course.fullname,
+          source: 'rules',
+        });
+
+        if (kb) {
+          const mistake = pickRandom(kb.commonMistakes, 1)[0];
+          recommendations.push({
+            type: 'recurso',
+            title: `Recursos para recuperar ${course.fullname}`,
+            description: `Error frecuente en esta materia: ${mistake}. Materiales recomendados: ${kb.resources.map(r => r.title).join(', ')}.`,
+            moodleCourseId: course.id,
+            moodleCourseName: course.fullname,
+            metadata: { resources: kb.resources },
+            source: 'rules',
+          });
+        }
+        break;
+      }
+
+      case 'necesita_mejora': {
+        let desc = avgGrade !== null
+          ? `Tu promedio es del ${avgGrade}%. `
+          : `Llevas un ${effectiveProgress}% de avance. `;
+
+        if (kb) {
+          desc += pickRandom(kb.studyStrategies, 1)[0];
+          recommendations.push({
+            type: 'estrategia',
+            title: `Mejora tu rendimiento en ${course.fullname}`,
+            description: desc.trim(),
+            moodleCourseId: course.id,
+            moodleCourseName: course.fullname,
+            source: 'rules',
+          });
+          const resource = pickRandom(kb.resources, 1)[0];
+          recommendations.push({
+            type: 'recurso',
+            title: `Refuerza ${course.fullname}`,
+            description: `Material de apoyo recomendado: ${resource.title}. Consulta también: ${kb.resources.filter(r => r.title !== resource.title).map(r => r.title).join(', ')}.`,
+            moodleCourseId: course.id,
+            moodleCourseName: course.fullname,
+            metadata: { resources: kb.resources },
+            source: 'rules',
+          });
+        } else {
+          desc += pickRandom(knowledgeBase.GENERAL.studyStrategies, 1)[0];
+          recommendations.push({
+            type: 'estrategia',
+            title: `Refuerza tu estudio en ${course.fullname}`,
+            description: desc.trim(),
+            moodleCourseId: course.id,
+            moodleCourseName: course.fullname,
+            source: 'rules',
+          });
+        }
+        break;
+      }
+
+      case 'en_buen_camino': {
+        const nextTopics = kb ? kb.topics.slice(4, 7).join(', ') : '';
+        recommendations.push({
+          type: 'ruta',
+          title: `Buen ritmo en ${course.fullname}`,
+          description: `Llevas un ${effectiveProgress}% de avance.${nextTopics ? ` Próximos temas a dominar: ${nextTopics}.` : ' ¡Mantén el ritmo!'}`,
+          moodleCourseId: course.id,
+          moodleCourseName: course.fullname,
+          source: 'rules',
+        });
+        break;
+      }
+
+      case 'destacado': {
+        const advancedTopics = kb ? kb.topics.slice(5).join(', ') : '';
+        recommendations.push({
+          type: 'ruta',
+          title: `¡Excelente desempeño en ${course.fullname}!`,
+          description: `Rendimiento sobresaliente: ${effectiveProgress}%.${advancedTopics ? ` Puedes explorar temas avanzados: ${advancedTopics}.` : ' ¡Sigue así!'}`,
+          moodleCourseId: course.id,
+          moodleCourseName: course.fullname,
+          source: 'rules',
+        });
+        if (kb) {
+          const resource = pickRandom(kb.resources, 1)[0];
+          recommendations.push({
+            type: 'refuerzo',
+            title: `Desafío avanzado: ${course.fullname}`,
+            description: `Para ir más allá del programa: ${resource.title} — ${resource.url}.`,
+            moodleCourseId: course.id,
+            moodleCourseName: course.fullname,
+            metadata: { resources: [resource] },
+            source: 'rules',
+          });
+        }
+        break;
+      }
+
+      case 'sin_datos':
+      default: {
+        // Sin datos de Moodle: sólo incluir si hay KB para ese curso
+        if (kb) {
+          const strategy = pickRandom(kb.studyStrategies, 1)[0];
+          recommendations.push({
+            type: 'recurso',
+            title: `Comienza con buen pie en ${course.fullname}`,
+            description: `${strategy} Recursos disponibles: ${kb.resources.map(r => r.title).join(', ')}.`,
+            moodleCourseId: course.id,
+            moodleCourseName: course.fullname,
+            metadata: { resources: kb.resources },
+            source: 'rules',
+          });
+        }
+        break;
+      }
     }
   });
 
-  // ── Regla 2: Calificaciones bajas (< 60%) en un curso ────────────────────
-  grades.forEach(gradeEntry => {
-    const lowGradeItems = gradeEntry.items.filter(i => i.percentage !== null && i.percentage < 60);
-    if (lowGradeItems.length === 0) return;
-
-    const kbKey = detectKBKey(gradeEntry.courseName);
-    const kb = kbKey ? knowledgeBase[kbKey] : null;
-
+  // ── Alerta de carga académica cuando hay 2+ cursos en riesgo ────────────
+  if (atRiskCourses.length >= 2) {
     recommendations.push({
       type: 'alerta',
-      title: `Calificaciones bajas en ${gradeEntry.courseName}`,
-      description: `Tienes ${lowGradeItems.length} actividad(es) con menos del 60%: ${lowGradeItems.map(i => `${i.name} (${i.percentage}%)`).join(', ')}.${kb ? ` Errores comunes: ${kb.commonMistakes[0]}.` : ''}`,
-      moodleCourseId: gradeEntry.courseId,
-      moodleCourseName: gradeEntry.courseName,
-      source: 'rules',
-    });
-
-    if (kb) {
-      recommendations.push({
-        type: 'estrategia',
-        title: `Estrategias para mejorar en ${gradeEntry.courseName}`,
-        description: kb.studyStrategies.slice(0, 3).join(' | '),
-        moodleCourseId: gradeEntry.courseId,
-        moodleCourseName: gradeEntry.courseName,
-        source: 'rules',
-      });
-    }
-  });
-
-  // ── Regla 3: Varios cursos en bajo progreso → alerta de carga académica ──
-  if (lowProgressCourses.length >= 2) {
-    recommendations.push({
-      type: 'estrategia',
-      title: 'Gestiona tu carga académica',
-      description: `Tienes ${lowProgressCourses.length} cursos con bajo progreso. ${knowledgeBase.GENERAL.studyStrategies.slice(0, 3).join(' | ')}`,
+      title: `Carga académica crítica — ${atRiskCourses.length} cursos en riesgo`,
+      description: `Requieren atención inmediata: ${atRiskCourses.map(c => c.fullname).join(', ')}. ${pickRandom(knowledgeBase.GENERAL.studyStrategies, 2).join(' ')}`,
       source: 'rules',
     });
   }
 
-  // ── Regla 4: Cursos con buen progreso → refuerzo positivo ────────────────
-  goodProgressCourses.forEach(course => {
-    const kbKey = detectKBKey(course.fullname);
-    const kb = kbKey ? knowledgeBase[kbKey] : null;
-    const nextTopics = kb ? kb.topics.slice(4, 6).join(', ') : '';
-
-    recommendations.push({
-      type: 'ruta',
-      title: `¡Buen avance en ${course.fullname}!`,
-      description: `Llevas un ${course.progress}% de progreso.${nextTopics ? ` Temas que vienen: ${nextTopics}.` : ' ¡Sigue así!'}`,
-      moodleCourseId: course.id,
-      moodleCourseName: course.fullname,
-      source: 'rules',
-    });
-  });
-
-  // ── Regla 4b: Cursos sin progreso bajo ni alto → sugerencia de inicio/KB ─
-  const coveredCourseIds = new Set([
-    ...lowProgressCourses.map(c => c.id),
-    ...goodProgressCourses.map(c => c.id),
-  ]);
-  const midProgressCourses = courses.filter(c => !coveredCourseIds.has(c.id));
-
-  midProgressCourses.forEach(course => {
-    const kbKey = detectKBKey(course.fullname);
-    const kb = kbKey ? knowledgeBase[kbKey] : null;
-    if (!kb) return;
-
-    const strategy = pickRandom(kb.studyStrategies, 1)[0];
-    const resource = kb.resources[0];
-
-    recommendations.push({
-      type: 'recurso',
-      title: `Consejos para ${course.fullname}`,
-      description: `${strategy} Recurso sugerido: ${resource.title}.`,
-      moodleCourseId: course.id,
-      moodleCourseName: course.fullname,
-      metadata: { resources: [resource] },
-      source: 'rules',
-    });
-  });
-
-  // ── Regla 5: Estrategia general aleatoria (rota entre las 6 disponibles) ─
-  const generalStrategies = pickRandom(knowledgeBase.GENERAL.studyStrategies, 3);
+  // ── Estrategia general aleatoria (rota para dar variedad) ───────────────
   recommendations.push({
     type: 'estrategia',
     title: 'Técnica de estudio recomendada',
-    description: generalStrategies.join(' | '),
+    description: pickRandom(knowledgeBase.GENERAL.studyStrategies, 3).join(' | '),
     source: 'rules',
   });
 
@@ -246,6 +350,65 @@ const isOffTopic = (message) => {
 };
 
 /**
+ * Detecta señales de angustia académica en el mensaje del estudiante.
+ * Inspirado en la clasificación de riesgo de SET aplicada a mensajes de chat.
+ * @param {string} message
+ * @returns {boolean}
+ */
+const isAcademicDistress = (message) => {
+  const msg = normalize(message);
+  const distressPatterns = [
+    'no entiendo nada', 'no entiendo nada de', 'no entiendo absolutamente',
+    'voy a perder', 'voy a reprobar', 'ya perdi', 'perdi la materia',
+    'me va muy mal', 'me esta yendo muy mal', 'me fue muy mal',
+    'llevo todo perdido', 'tengo todo perdido', 'voy perdiendo todo',
+    'no se nada', 'no se nada de', 'soy muy malo', 'se me da muy mal',
+    'estoy desesperado', 'estoy desesperada', 'ya no se que hacer',
+    'quiero abandonar', 'voy a abandonar', 'quiero retirarme',
+    'necesito ayuda urgente', 'necesito ayuda ya',
+    'me van a echar', 'pierdo el semestre', 'voy a perder el semestre',
+  ];
+  return distressPatterns.some(p => msg.includes(normalize(p)));
+};
+
+/**
+ * Genera una respuesta empática cuando se detecta angustia académica.
+ * Incluye los cursos con alertas como contexto concreto de apoyo.
+ * @param {Object} studentContext - { courses, grades }
+ * @returns {string}
+ */
+const getDistressResponse = (studentContext) => {
+  const { courses = [], grades = [] } = studentContext;
+
+  const gradesByCourse = {};
+  grades.forEach(g => { gradesByCourse[g.courseId] = g; });
+
+  const atRiskList = courses
+    .filter(c => {
+      const { level } = classifyStudentStatus(c, gradesByCourse[c.id] ?? null);
+      return level === 'en_riesgo' || level === 'necesita_mejora';
+    })
+    .map(c => `• ${c.fullname}`)
+    .join('\n');
+
+  const coursePart = atRiskList
+    ? `\n\nViendo tu perfil, los cursos donde puedo ayudarte más ahora mismo son:\n${atRiskList}`
+    : '';
+
+  return `Entiendo que estás pasando por un momento difícil, y está bien pedir ayuda — eso ya es un gran paso.
+
+Lo más importante ahora es que no estás solo/a. Muchos estudiantes sienten exactamente lo mismo en algún punto del semestre.${coursePart}
+
+**Lo que puedo hacer por ti ahora mismo:**
+• Explicarte cualquier concepto desde cero, sin juzgar
+• Darte una ruta clara de temas a repasar según tu situación
+• Recomendarte recursos gratuitos específicos para tu materia
+• Ayudarte a organizar un plan de estudio por los días que quedan
+
+¿Por cuál materia o tema quieres que empecemos? Cuéntame qué es lo que más te está costando.`;
+};
+
+/**
  * Respuesta de redirección cuando se detecta solicitud de respuesta directa.
  * @returns {string}
  */
@@ -278,9 +441,12 @@ const getOffTopicResponse = () => {
 
 module.exports = {
   generateRecommendations,
+  classifyStudentStatus,
   isExerciseRequest,
   isOffTopic,
+  isAcademicDistress,
   getExerciseRedirectResponse,
   getOffTopicResponse,
+  getDistressResponse,
   detectKBKey,
 };

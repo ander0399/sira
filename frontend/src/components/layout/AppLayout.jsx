@@ -12,11 +12,10 @@ export default function AppLayout() {
 
   return (
     <div className="min-h-screen bg-surface">
-      <Header onMenuClick={() => setSidebarOpen(true)} />
+      <Header onMenuClick={() => setSidebarOpen(o => !o)} />
       <Sidebar isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />
 
-      {/* Contenido principal — margen izquierdo para el sidebar en desktop */}
-      <main className="pt-16 md:ml-60 min-h-screen">
+      <main className={`pt-16 min-h-screen transition-all duration-300 ${sidebarOpen ? 'ml-60' : 'ml-0'}`}>
         <div className="p-4 md:p-6 max-w-6xl">
           <Outlet />
         </div>

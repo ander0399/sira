@@ -49,7 +49,10 @@ export default function Dashboard() {
   const handleGenerateRecs = () => dispatch(generateRecommendations());
 
   const displayName = user?.fullName?.split(' ')[0] || user?.name?.split(' ')[0] || 'Bienvenido';
-  const lowProgress = courses.filter(c => c.progress !== null && c.progress !== undefined && c.progress < 40);
+
+  // "En riesgo" se deriva de las alertas generadas por el motor de clasificación
+  // (cubre tanto progress < 45 como calificaciones < 50%, incluso cuando progress es null)
+  const atRiskCount = recommendations.filter(r => r.type === 'alerta' && r.moodleCourseId).length;
   const unreadRecs  = recommendations.filter(r => !r.isRead);
 
   return (
@@ -65,7 +68,7 @@ export default function Dashboard() {
             <div className="text-xs text-white/80">Cursos activos</div>
           </div>
           <div className="bg-white/20 rounded-xl px-4 py-2 text-center">
-            <div className="text-xl font-bold">{lowProgress.length}</div>
+            <div className="text-xl font-bold">{atRiskCount}</div>
             <div className="text-xs text-white/80">En riesgo</div>
           </div>
           <div className="bg-white/20 rounded-xl px-4 py-2 text-center">
@@ -112,10 +115,10 @@ export default function Dashboard() {
           <ul className="space-y-4">
             {courses.map((c) => <CourseProgressBar key={c.id} course={c} />)}
           </ul>
-          {lowProgress.length > 0 && (
+          {atRiskCount > 0 && (
             <div className="mt-4 bg-red-50 rounded-lg p-3">
               <p className="text-xs text-red-600 font-semibold">
-                ⚠️ Cursos con progreso bajo (&lt;40%): {lowProgress.map(c => c.fullname).join(', ')}
+                ⚠️ Tienes {atRiskCount} curso(s) con alertas académicas activas. Revisa tus recomendaciones.
               </p>
             </div>
           )}
