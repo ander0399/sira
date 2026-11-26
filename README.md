@@ -251,4 +251,4 @@ Esto devuelve un JWT SIRA que puede usarse para explorar el frontend directament
 
 Proyecto de grado — Ingeniería de Sistemas  
 **Universidad Francisco de Paula Santander (UFPS)** · Cúcuta, 2026  
-Autores: **Anderson Escorcia** , **Daniel Gerardino**
+Autores: **Anderson Escorcia - Daniel Gerardino** 
