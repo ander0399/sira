@@ -30,12 +30,14 @@ node_modules/
 .env.example
 
 #docs
+/docs
 SIRA_Anteproyecto.pdf
 reglas.md
 COMO_EJECUTAR.md
 DOCKER_SETUP.md
 set.pdf
 block_sira.zip
+arquitectura.png
 
 
 #images

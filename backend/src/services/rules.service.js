@@ -48,13 +48,13 @@ const classifyStudentStatus = (course, gradeEntry) => {
     ? Math.round(gradedItems.reduce((sum, i) => sum + i.percentage, 0) / gradedItems.length)
     : null;
 
-  // Activities failing below 60%, sorted worst first
+  // Actividades con rendimiento crítico (bajo 60%), ordenadas de peor a mejor
   const worstItems = gradedItems
     .filter(i => i.percentage < 60)
     .sort((a, b) => a.percentage - b.percentage)
     .slice(0, 3);
 
-  // Use Moodle completion progress when available; fall back to grade average as proxy
+  // Si hay porcentaje de progreso Moodle se usa; si no, el promedio de notas sirve de proxy
   const effectiveProgress = progress !== null ? progress : avgGrade;
 
   if (effectiveProgress === null) {

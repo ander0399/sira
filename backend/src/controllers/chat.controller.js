@@ -33,8 +33,8 @@ const sendMessage = async (req, res) => {
     // Enriquecer contexto con cursos Moodle si el token está disponible
     let courses = [];
     let grades  = [];
-
     let enrolledStudents = [];
+    let targetCourse = null;
 
     if (moodleToken) {
       try {
@@ -45,7 +45,7 @@ const sendMessage = async (req, res) => {
         // Prioridad 2: primer curso con bajo progreso
         // Fallback:    primer curso disponible (garantiza que siempre haya contexto de notas)
         const targetCourseId = courseId ? parseInt(courseId) : null;
-        const targetCourse   = targetCourseId
+        targetCourse = targetCourseId
           ? courses.find(c => c.id === targetCourseId)
           : (courses.find(c => c.progress !== null && c.progress < 40) ?? courses[0]);
 

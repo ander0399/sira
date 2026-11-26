@@ -46,7 +46,7 @@ const chatSlice = createSlice({
     messages:      [],       // [{ role, content, source, createdAt }]
     sessionId:     null,     // UUID de la sesión activa
     isTyping:      false,    // SIRA está "escribiendo"
-    aiAvailable:   false,    // si Groq está activo en el backend
+    aiAvailable:   false,    // si Gemini está activo en el backend
     activeCourseId: savedCourseId, // ID del curso desde donde se abrió el plugin
     error:         null,
   },
